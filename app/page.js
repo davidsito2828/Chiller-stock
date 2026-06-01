@@ -1,0 +1,775 @@
+'use client';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { supabase } from '../lib/supabase';
+import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw } from 'lucide-react';
+
+const AZUL = '#0000DE';
+const AZUL_OSC = '#0000A8';
+const LOGO = '/logo-chillersystem.jpeg';
+
+const ROL_LABEL = {
+  supervisor: 'Supervisor / Técnico',
+  dueno: 'Dueño',
+  deposito: 'Depósito / Logística',
+};
+
+export default function Home() {
+  const [usuario, setUsuario] = useState(null);
+  const [vista, setVista] = useState('dashboard');
+
+  // Restaurar sesión guardada (solo el dato del usuario, no es login real)
+  useEffect(() => {
+    const guardado = typeof window !== 'undefined' ? window.sessionStorage.getItem('cs_user') : null;
+    if (guardado) setUsuario(JSON.parse(guardado));
+  }, []);
+
+  const login = (u) => {
+    setUsuario(u);
+    window.sessionStorage.setItem('cs_user', JSON.stringify(u));
+  };
+  const logout = () => {
+    setUsuario(null);
+    window.sessionStorage.removeItem('cs_user');
+  };
+
+  if (!usuario) return <Login onLogin={login} />;
+  const rol = usuario.rol;
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#F4F6FB' }}>
+      <Header usuario={usuario} onLogout={logout} />
+      <div style={{ display: 'flex', maxWidth: 1300, margin: '0 auto' }}>
+        <Sidebar vista={vista} setVista={setVista} rol={rol} />
+        <main style={{ flex: 1, padding: '24px 28px', minHeight: 'calc(100vh - 64px)' }}>
+          {vista === 'dashboard' && <Dashboard />}
+          {vista === 'stock' && <Stock rol={rol} usuario={usuario} />}
+          {vista === 'refrigerantes' && <Refrigerantes rol={rol} usuario={usuario} />}
+          {vista === 'cobre' && <Cobre rol={rol} usuario={usuario} />}
+          {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => setVista('pedidos')} />}
+          {vista === 'pedidos' && <Pedidos rol={rol} usuario={usuario} />}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+// ============ Carrito global simple (en memoria de sesión) ============
+const carritoStore = {
+  items: [],
+  listeners: new Set(),
+  get() { return this.items; },
+  set(items) { this.items = items; this.listeners.forEach(l => l(items)); },
+  add(item) {
+    const ex = this.items.find(c => c.id === item.id);
+    if (ex) this.set(this.items.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c));
+    else this.set([...this.items, item]);
+  },
+  subscribe(l) { this.listeners.add(l); return () => this.listeners.delete(l); },
+};
+function useCarrito() {
+  const [items, setItems] = useState(carritoStore.get());
+  useEffect(() => carritoStore.subscribe(setItems), []);
+  return items;
+}
+
+// ========================= LOGIN =========================
+function Login({ onLogin }) {
+  const [mail, setMail] = useState('');
+  const [error, setError] = useState('');
+  const [paso, setPaso] = useState('mail');
+  const [datosMail, setDatosMail] = useState(null);
+
+  const validar = () => {
+    const m = mail.trim().toLowerCase();
+    if (!m.endsWith('@chillersystem.com')) {
+      setError('El acceso es solo con tu correo corporativo @chillersystem.com');
+      return;
+    }
+    if (m === 'david.cufre@chillersystem.com') { onLogin({ mail: m, nombre: 'David Cufré', rol: 'supervisor' }); return; }
+    const nombre = m.split('@')[0].replace(/\./g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    setDatosMail({ mail: m, nombre });
+    setPaso('rol');
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(135deg, ${AZUL} 0%, ${AZUL_OSC} 100%)`, padding: 16 }}>
+      <div style={{ background: '#fff', borderRadius: 16, padding: '40px 36px', width: 410, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,40,.35)' }}>
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <img src={LOGO} alt="Chiller System" style={{ width: 130, marginBottom: 8 }} />
+          <h2 style={{ margin: '8px 0 2px', color: AZUL, fontSize: 22 }}>Control de Stock</h2>
+          <p style={{ margin: 0, color: '#888', fontSize: 13 }}>Sistema interno · Acceso corporativo</p>
+        </div>
+        {paso === 'mail' && <>
+          <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Correo de trabajo</label>
+          <input value={mail} onChange={e => { setMail(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && validar()}
+            placeholder="nombre@chillersystem.com" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 4, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
+          {error && <p style={{ color: '#d32f2f', fontSize: 12.5, margin: '4px 0' }}>{error}</p>}
+          <button onClick={validar} style={{ width: '100%', marginTop: 14, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <LogIn size={18} /> Continuar
+          </button>
+          <p style={{ marginTop: 18, fontSize: 12, color: '#999', textAlign: 'center' }}>Cualquier correo <b>@chillersystem.com</b> tiene acceso.</p>
+        </>}
+        {paso === 'rol' && <>
+          <p style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 4 }}>Hola <b>{datosMail.nombre}</b></p>
+          <p style={{ fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 16 }}>¿Con qué rol vas a trabajar?</p>
+          {[['supervisor', 'Supervisor / Técnico', 'Consulta stock y solicita pedidos'],
+            ['deposito', 'Depósito / Logística', 'Carga stock, entrega y mueve refrigerantes/cañería'],
+            ['dueno', 'Dueño / Gerencia', 'Aprueba pedidos y ve todo']].map(([r, t, d]) => (
+            <button key={r} onClick={() => onLogin({ ...datosMail, rol: r })}
+              style={{ width: '100%', textAlign: 'left', padding: '13px 15px', marginBottom: 9, borderRadius: 10, border: '1.5px solid #e0e0e0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 11 }}>
+              <ArrowRight size={16} color={AZUL} />
+              <div><div style={{ fontWeight: 700, fontSize: 14.5, color: '#222' }}>{t}</div><div style={{ fontSize: 12, color: '#999' }}>{d}</div></div>
+            </button>))}
+          <button onClick={() => setPaso('mail')} style={{ width: '100%', marginTop: 4, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
+        </>}
+      </div>
+    </div>
+  );
+}
+
+// ========================= HEADER =========================
+function Header({ usuario, onLogout }) {
+  return (
+    <header style={{ background: '#fff', borderBottom: `3px solid ${AZUL}`, padding: '0 28px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,.04)' }}>
+      <img src={LOGO} alt="Chiller System" style={{ height: 42 }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#222' }}>{usuario.nombre}</div>
+          <div style={{ fontSize: 11.5, color: AZUL, fontWeight: 600 }}>{ROL_LABEL[usuario.rol]}</div>
+        </div>
+        <button onClick={onLogout} style={{ background: 'none', border: '1.5px solid #ddd', borderRadius: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer', color: '#666' }}>Salir</button>
+      </div>
+    </header>
+  );
+}
+
+// ========================= SIDEBAR =========================
+function Sidebar({ vista, setVista, rol }) {
+  const carrito = useCarrito();
+  const items = [
+    { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['supervisor', 'dueno', 'deposito'] },
+    { id: 'stock', label: 'Stock General', icon: Boxes, roles: ['supervisor', 'dueno', 'deposito'] },
+    { id: 'refrigerantes', label: 'Refrigerantes', icon: Droplets, roles: ['supervisor', 'dueno', 'deposito'] },
+    { id: 'cobre', label: 'Cañería de Cobre', icon: Wrench, roles: ['supervisor', 'dueno', 'deposito'] },
+    { id: 'carrito', label: 'Mi Pedido', icon: ShoppingCart, roles: ['supervisor'], badge: carrito.length },
+    { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'dueno', 'deposito'] },
+  ];
+  return (
+    <aside style={{ width: 220, background: '#fff', borderRight: '1px solid #eee', padding: '20px 14px', minHeight: 'calc(100vh - 64px)' }}>
+      {items.filter(i => i.roles.includes(rol)).map(it => {
+        const Icon = it.icon; const active = vista === it.id;
+        return (
+          <button key={it.id} onClick={() => setVista(it.id)}
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 11, padding: '11px 13px', marginBottom: 4, borderRadius: 9, border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 14.5, fontWeight: active ? 700 : 500, background: active ? AZUL : 'transparent', color: active ? '#fff' : '#444' }}>
+            <Icon size={18} /> <span style={{ flex: 1 }}>{it.label}</span>
+            {it.badge > 0 && <span style={{ background: active ? '#fff' : '#e53935', color: active ? AZUL : '#fff', borderRadius: 10, fontSize: 11, fontWeight: 700, padding: '1px 7px' }}>{it.badge}</span>}
+          </button>);
+      })}
+    </aside>
+  );
+}
+
+// ========================= DASHBOARD =========================
+function Dashboard() {
+  const [stats, setStats] = useState(null);
+  useEffect(() => {
+    (async () => {
+      const [prod, garr, cob, ped] = await Promise.all([
+        supabase.from('productos').select('deposito, cantidad'),
+        supabase.from('garrafas').select('estado'),
+        supabase.from('cobre').select('metros'),
+        supabase.from('pedidos').select('estado, numero, solicitante, creado_en').order('creado_en', { ascending: false }).limit(5),
+      ]);
+      const productos = prod.data || [];
+      const garrafas = garr.data || [];
+      const cobre = cob.data || [];
+      setStats({
+        totalItems: productos.length,
+        totalUnidades: productos.reduce((a, b) => a + (b.cantidad || 0), 0),
+        bajos: productos.filter(p => p.cantidad > 0 && p.cantidad <= 2).length,
+        caseros: productos.filter(p => p.deposito === 'Caseros'),
+        mataderos: productos.filter(p => p.deposito === 'Mataderos'),
+        garrAfuera: garrafas.filter(g => g.estado === 'afuera').length,
+        garrTotal: garrafas.length,
+        metrosCobre: cobre.reduce((a, b) => a + Number(b.metros || 0), 0),
+        pendientes: (ped.data || []).filter(p => p.estado === 'pendiente').length,
+        ultimos: ped.data || [],
+      });
+    })();
+  }, []);
+  if (!stats) return <Cargando />;
+  const cards = [
+    { label: 'Ítems en catálogo', value: stats.totalItems, icon: Package, color: AZUL },
+    { label: 'Unidades totales', value: stats.totalUnidades, icon: Boxes, color: '#00897b' },
+    { label: 'Stock bajo (≤2)', value: stats.bajos, icon: ArrowDownToLine, color: '#f57c00' },
+    { label: 'Pedidos pendientes', value: stats.pendientes, icon: Clock, color: '#e53935' },
+  ];
+  return (
+    <div>
+      <SectionTitle icon={LayoutDashboard} title="Panel principal" sub="Resumen general del depósito" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 26 }}>
+        {cards.map((c, i) => { const Icon = c.icon; return (
+          <div key={i} style={{ background: '#fff', borderRadius: 13, padding: 20, boxShadow: '0 2px 12px rgba(0,0,0,.05)', borderLeft: `4px solid ${c.color}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div><div style={{ fontSize: 30, fontWeight: 800, color: '#1a1a1a' }}>{c.value}</div><div style={{ fontSize: 13, color: '#888', marginTop: 2 }}>{c.label}</div></div>
+              <div style={{ background: c.color + '18', borderRadius: 10, padding: 9 }}><Icon size={22} color={c.color} /></div>
+            </div>
+          </div>); })}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 }}>
+        <Card title="Stock por depósito">
+          {[['Caseros', stats.caseros], ['Mataderos', stats.mataderos]].map(([dep, items]) => {
+            const un = items.reduce((a, b) => a + b.cantidad, 0);
+            const pct = stats.totalItems ? Math.round((items.length / stats.totalItems) * 100) : 0;
+            return (
+              <div key={dep} style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, marginBottom: 5 }}>
+                  <b style={{ color: '#333' }}><Building2 size={14} style={{ verticalAlign: -2 }} /> {dep}</b>
+                  <span style={{ color: '#888' }}>{items.length} ítems · {un} u.</span>
+                </div>
+                <div style={{ height: 9, background: '#eee', borderRadius: 5 }}><div style={{ height: '100%', width: pct + '%', background: AZUL, borderRadius: 5 }} /></div>
+              </div>);
+          })}
+          <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid #eee', fontSize: 13.5, color: '#666', display: 'flex', gap: 22, flexWrap: 'wrap' }}>
+            <span><Droplets size={14} color="#0288d1" style={{ verticalAlign: -2 }} /> <b>{stats.garrTotal}</b> garrafas ({stats.garrAfuera} afuera)</span>
+            <span><Wrench size={14} color="#b8860b" style={{ verticalAlign: -2 }} /> <b>{stats.metrosCobre}</b> m de cobre</span>
+          </div>
+        </Card>
+        <Card title="Últimos pedidos">
+          {stats.ultimos.length === 0 ? <Empty texto="Todavía no hay pedidos cargados" />
+            : stats.ultimos.map(p => (
+              <div key={p.numero} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '9px 0', borderBottom: '1px solid #f0f0f0' }}>
+                <div><b style={{ color: AZUL, fontSize: 14 }}>#{p.numero}</b><span style={{ fontSize: 12.5, color: '#777', marginLeft: 8 }}>{p.solicitante}</span></div>
+                <EstadoBadge estado={p.estado} />
+              </div>))}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+// ========================= STOCK =========================
+function Stock({ rol, usuario }) {
+  const [stock, setStock] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busca, setBusca] = useState('');
+  const [dep, setDep] = useState('Todos');
+  const [cat, setCat] = useState('Todas');
+  const [modalEntrada, setModalEntrada] = useState(null);
+  const carrito = useCarrito();
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('productos').select('*').order('nombre');
+    setStock(data || []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const categorias = useMemo(() => ['Todas', ...Array.from(new Set(stock.map(s => s.categoria).filter(Boolean))).sort()], [stock]);
+  const filtrado = useMemo(() => {
+    const q = busca.toLowerCase();
+    return stock.filter(s => (dep === 'Todos' || s.deposito === dep) && (cat === 'Todas' || s.categoria === cat) &&
+      (q === '' || s.nombre.toLowerCase().includes(q) || (s.marca || '').toLowerCase().includes(q) || (s.codigo || '').toLowerCase().includes(q) || (s.modelo || '').toLowerCase().includes(q))).slice(0, 300);
+  }, [stock, busca, dep, cat]);
+
+  const agregarCarrito = (item) => carritoStore.add({ id: item.id, n: item.nombre, ma: item.marca, co: item.codigo, dep: item.deposito, qty: 1, disp: item.cantidad });
+
+  const ingresar = async (item, cant, depDestino) => {
+    if (depDestino === item.deposito) {
+      await supabase.from('productos').update({ cantidad: item.cantidad + cant }).eq('id', item.id);
+    } else {
+      const { data: existe } = await supabase.from('productos').select('*').eq('nombre', item.nombre).eq('deposito', depDestino).maybeSingle();
+      if (existe) await supabase.from('productos').update({ cantidad: existe.cantidad + cant }).eq('id', existe.id);
+      else await supabase.from('productos').insert({ nombre: item.nombre, marca: item.marca, modelo: item.modelo, descripcion: item.descripcion, codigo: item.codigo, categoria: item.categoria, deposito: depDestino, cantidad: cant });
+    }
+    setModalEntrada(null);
+    cargar();
+  };
+
+  return (
+    <div>
+      <SectionTitle icon={Boxes} title="Stock General" sub={`${stock.length} ítems · Caseros + Mataderos`} accion={<BotonRefrescar onClick={cargar} />} />
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
+          <Search size={17} color="#999" style={{ position: 'absolute', left: 12, top: 11 }} />
+          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar por nombre, marca, código o modelo..."
+            style={{ width: '100%', padding: '10px 12px 10px 38px', borderRadius: 9, border: '1.5px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none' }} />
+        </div>
+        <Select value={dep} onChange={setDep} options={['Todos', 'Caseros', 'Mataderos']} />
+        <Select value={cat} onChange={setCat} options={categorias} />
+      </div>
+      {loading ? <Cargando /> : (
+        <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 700 }}>
+            <thead><tr style={{ background: AZUL, color: '#fff', textAlign: 'left' }}>
+              <th style={th}>Producto</th><th style={th}>Marca / Modelo</th><th style={th}>Código</th><th style={th}>Depósito</th>
+              <th style={{ ...th, textAlign: 'center' }}>Cant.</th><th style={{ ...th, textAlign: 'center', width: 150 }}>Acción</th>
+            </tr></thead>
+            <tbody>
+              {filtrado.map(s => (
+                <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={td}><b style={{ color: '#222' }}>{s.nombre}</b>{s.descripcion && <div style={{ fontSize: 11.5, color: '#999' }}>{s.descripcion}</div>}</td>
+                  <td style={td}>{s.marca}{s.modelo && <span style={{ color: '#999' }}> · {s.modelo}</span>}</td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 12, color: '#777' }}>{s.codigo || '—'}</td>
+                  <td style={td}><DepBadge dep={s.deposito} /></td>
+                  <td style={{ ...td, textAlign: 'center' }}><span style={{ fontWeight: 700, color: s.cantidad === 0 ? '#e53935' : s.cantidad <= 2 ? '#f57c00' : '#222', fontSize: 15 }}>{s.cantidad}</span></td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    {rol === 'supervisor' && <button onClick={() => agregarCarrito(s)} disabled={s.cantidad === 0} style={{ ...btnMini, background: s.cantidad === 0 ? '#ddd' : AZUL, cursor: s.cantidad === 0 ? 'not-allowed' : 'pointer' }}><Plus size={14} /> Pedir</button>}
+                    {rol === 'deposito' && <button onClick={() => setModalEntrada(s)} style={{ ...btnMini, background: '#00897b' }}><ArrowDownToLine size={14} /> Ingreso</button>}
+                    {rol === 'dueno' && <span style={{ color: '#bbb', fontSize: 12 }}>—</span>}
+                  </td>
+                </tr>))}
+            </tbody>
+          </table>
+          {filtrado.length === 0 && <Empty texto="No se encontraron productos con ese filtro" />}
+        </div>
+      )}
+      {modalEntrada && <ModalEntrada item={modalEntrada} onClose={() => setModalEntrada(null)} onConfirm={ingresar} />}
+    </div>
+  );
+}
+function ModalEntrada({ item, onClose, onConfirm }) {
+  const [cant, setCant] = useState(1);
+  const [dep, setDep] = useState(item.deposito);
+  const moviendo = dep !== item.deposito;
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 4px', color: AZUL }}>Ingreso de stock</h3>
+      <p style={{ margin: '0 0 16px', fontSize: 14, color: '#555' }}><b>{item.nombre}</b></p>
+      <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '12px 14px', marginBottom: 16, fontSize: 14 }}>Stock actual en <b>{item.deposito}</b>: <b>{item.cantidad}</b></div>
+      <Field label="¿Dónde queda el producto? (lo confirma logística)"><select value={dep} onChange={e => setDep(e.target.value)} style={inp}><option>Caseros</option><option>Mataderos</option></select></Field>
+      {moviendo && <div style={{ background: '#fff3e0', borderRadius: 8, padding: '9px 12px', fontSize: 12.5, color: '#e65100', marginBottom: 12 }}>El ingreso se registrará en <b>{dep}</b>.</div>}
+      <label style={{ fontSize: 13, fontWeight: 600, color: '#555' }}>Cantidad que ingresa</label>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 16px' }}>
+        <button onClick={() => setCant(Math.max(1, cant - 1))} style={qtyBtn}><Minus size={16} /></button>
+        <input type="number" value={cant} onChange={e => setCant(Math.max(1, parseInt(e.target.value) || 1))} style={{ width: 80, textAlign: 'center', padding: 9, borderRadius: 8, border: '1.5px solid #ddd', fontSize: 16, fontWeight: 700 }} />
+        <button onClick={() => setCant(cant + 1)} style={qtyBtn}><Plus size={16} /></button>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => onConfirm(item, cant, dep)} style={{ ...btnPri, flex: 1, background: '#00897b' }}>Confirmar ingreso</button></div>
+    </ModalShell>
+  );
+}
+
+// ========================= REFRIGERANTES =========================
+function Refrigerantes({ rol, usuario }) {
+  const [garrafas, setGarrafas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [filtro, setFiltro] = useState('Todas');
+  const esDeposito = rol === 'deposito';
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('garrafas').select('*').order('codigo');
+    setGarrafas(data || []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const diasEntre = (iso) => iso ? Math.max(0, Math.round((Date.now() - new Date(iso)) / 86400000)) : 0;
+
+  const salida = async (d) => {
+    await supabase.from('garrafas').update({ estado: 'afuera', supervisor: d.supervisor, destino: d.destino, salida: new Date().toISOString(), regreso: null, dias: null }).eq('id', d.garrafaId);
+    setModal(null); cargar();
+  };
+  const regreso = async (d) => {
+    const g = garrafas.find(x => x.id === d.garrafaId);
+    const dias = diasEntre(g.salida);
+    await supabase.from('garrafas').update({ estado: 'vacia', regreso: new Date().toISOString(), dias, quien_devuelve: d.quienDevuelve }).eq('id', d.garrafaId);
+    setModal(null); cargar();
+  };
+  const recargar = async (id) => {
+    await supabase.from('garrafas').update({ estado: 'disponible', supervisor: null, destino: null, salida: null, regreso: null, dias: null, quien_devuelve: null }).eq('id', id);
+    cargar();
+  };
+  const nueva = async (d) => {
+    await supabase.from('garrafas').insert({ codigo: d.codigo, gas: d.gas, tipo_garrafa: d.tg, marca: d.ma, estado: 'disponible' });
+    setModal(null); cargar();
+  };
+  const eliminar = async (id) => { await supabase.from('garrafas').delete().eq('id', id); cargar(); };
+
+  const fmt = (iso) => iso ? new Date(iso).toLocaleDateString('es-AR') : '—';
+  const disponibles = garrafas.filter(g => g.estado === 'disponible').length;
+  const afuera = garrafas.filter(g => g.estado === 'afuera').length;
+  const vacias = garrafas.filter(g => g.estado === 'vacia').length;
+  const lista = filtro === 'Todas' ? garrafas : garrafas.filter(g => g.estado === filtro);
+
+  return (
+    <div>
+      <SectionTitle icon={Droplets} title="Refrigerantes — Control de Garrafas" sub="Trazabilidad individual · sale llena / vuelve vacía" accion={<BotonRefrescar onClick={cargar} />} />
+      <div style={{ background: '#E1F5FE', border: '1px solid #b3e5fc', borderRadius: 11, padding: '13px 16px', marginBottom: 18, fontSize: 13.5, color: '#01579b' }}>
+        <b>Ciclo de cada garrafa:</b> logística registra cuando <b>sale</b> (a qué supervisor y destino) y cuando <b>vuelve vacía</b> (quién la devuelve y los días afuera, calculados solos). {!esDeposito && <span>Solo <b>Depósito/Logística</b> registra movimientos.</span>}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px,1fr))', gap: 14, marginBottom: 20 }}>
+        {[['Disponibles (llenas)', disponibles, '#2e7d32', CheckCircle2], ['Afuera (en la calle)', afuera, '#e65100', ArrowUpFromLine], ['Vacías (a recargar)', vacias, '#c62828', ArrowDownToLine]].map(([t, v, col, Ic]) => (
+          <div key={t} style={{ background: '#fff', borderRadius: 13, padding: 18, boxShadow: '0 2px 12px rgba(0,0,0,.05)', borderLeft: `4px solid ${col}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div><div style={{ fontSize: 28, fontWeight: 800, color: '#1a1a1a' }}>{v}</div><div style={{ fontSize: 12.5, color: '#888' }}>{t}</div></div><Ic size={24} color={col} />
+          </div>))}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        {['Todas', 'disponible', 'afuera', 'vacia'].map(f => (
+          <button key={f} onClick={() => setFiltro(f)} style={{ padding: '7px 14px', borderRadius: 20, border: '1.5px solid ' + (filtro === f ? '#0288d1' : '#ddd'), background: filtro === f ? '#0288d1' : '#fff', color: filtro === f ? '#fff' : '#666', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{f === 'Todas' ? 'Todas' : f === 'disponible' ? 'Disponibles' : f === 'afuera' ? 'Afuera' : 'Vacías'}</button>))}
+        {esDeposito && <button onClick={() => setModal({ tipo: 'nueva' })} style={{ ...btnPri, background: '#0288d1', marginLeft: 'auto' }}><Plus size={16} /> Nueva garrafa</button>}
+      </div>
+      {loading ? <Cargando /> : (
+        <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 800 }}>
+            <thead><tr style={{ background: '#0288d1', color: '#fff', textAlign: 'left' }}>
+              <th style={th}>Garrafa</th><th style={th}>Gas / Tipo</th><th style={th}>Estado</th><th style={th}>Supervisor</th><th style={th}>Destino</th><th style={th}>Salida</th><th style={th}>Días</th><th style={th}>Regreso</th>{esDeposito && <th style={{ ...th, textAlign: 'center', width: 180 }}>Acción</th>}
+            </tr></thead>
+            <tbody>
+              {lista.map(g => {
+                const da = g.estado === 'afuera' ? diasEntre(g.salida) : null;
+                return (
+                  <tr key={g.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                    <td style={td}><b style={{ color: '#01579b', fontSize: 14 }}>{g.codigo}</b></td>
+                    <td style={td}><span style={{ background: gasColor(g.gas) + '20', color: gasColor(g.gas), fontWeight: 700, fontSize: 12, padding: '2px 9px', borderRadius: 14 }}>{g.gas.toUpperCase()}</span><div style={{ fontSize: 11.5, color: '#999', marginTop: 2 }}>{g.tipo_garrafa}</div></td>
+                    <td style={td}><GarrafaEstado estado={g.estado} /></td>
+                    <td style={td}>{g.supervisor || '—'}</td><td style={td}>{g.destino || '—'}</td><td style={td}>{fmt(g.salida)}</td>
+                    <td style={td}>{g.estado === 'afuera' ? <b style={{ color: da > 30 ? '#c62828' : '#e65100' }}>{da} d</b> : g.dias != null ? <b style={{ color: '#555' }}>{g.dias} d</b> : '—'}</td>
+                    <td style={td}>{g.regreso ? <span>{fmt(g.regreso)}{g.quien_devuelve && <div style={{ fontSize: 11, color: '#999' }}>por {g.quien_devuelve}</div>}</span> : '—'}</td>
+                    {esDeposito && <td style={{ ...td, textAlign: 'center' }}>
+                      {g.estado === 'disponible' && <button onClick={() => setModal({ tipo: 'salida', garrafa: g })} style={{ ...btnMini, background: '#e65100' }}><ArrowUpFromLine size={13} /> Sale</button>}
+                      {g.estado === 'afuera' && <button onClick={() => setModal({ tipo: 'regreso', garrafa: g })} style={{ ...btnMini, background: '#00897b' }}><ArrowDownToLine size={13} /> Volvió vacía</button>}
+                      {g.estado === 'vacia' && <button onClick={() => recargar(g.id)} style={{ ...btnMini, background: '#0288d1' }}><CheckCircle2 size={13} /> Recargada</button>}
+                      <button onClick={() => eliminar(g.id)} style={{ ...btnMini, background: '#fff', color: '#c62828', border: '1.5px solid #ffcdd2', marginLeft: 5 }}><Trash2 size={13} /></button>
+                    </td>}
+                  </tr>);
+              })}
+            </tbody>
+          </table>
+          {lista.length === 0 && <Empty texto="No hay garrafas en este estado" />}
+        </div>
+      )}
+      {modal?.tipo === 'salida' && <ModalSalidaGarrafa garrafa={modal.garrafa} onClose={() => setModal(null)} onConfirm={salida} />}
+      {modal?.tipo === 'regreso' && <ModalRegresoGarrafa garrafa={modal.garrafa} dias={diasEntre(modal.garrafa.salida)} onClose={() => setModal(null)} onConfirm={regreso} />}
+      {modal?.tipo === 'nueva' && <ModalNuevaGarrafa onClose={() => setModal(null)} onConfirm={nueva} />}
+    </div>
+  );
+}
+function GarrafaEstado({ estado }) {
+  const map = { disponible: ['#e8f5e9', '#2e7d32', 'Disponible'], afuera: ['#fff3e0', '#e65100', 'Afuera'], vacia: ['#ffebee', '#c62828', 'Vacía'] };
+  const [bg, col, txt] = map[estado] || map.disponible;
+  return <span style={{ background: bg, color: col, fontSize: 12, fontWeight: 700, padding: '3px 11px', borderRadius: 20 }}>{txt}</span>;
+}
+function ModalSalidaGarrafa({ garrafa, onClose, onConfirm }) {
+  const [supervisor, setSupervisor] = useState('');
+  const [destino, setDestino] = useState('');
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 4px', color: '#e65100' }}>Salida de garrafa (llena)</h3>
+      <p style={{ margin: '0 0 16px', fontSize: 14, color: '#555' }}>Garrafa <b>{garrafa.codigo}</b> · {garrafa.gas.toUpperCase()} · {garrafa.tipo_garrafa}</p>
+      <Field label="¿A qué supervisor/técnico se entrega?"><input value={supervisor} onChange={e => setSupervisor(e.target.value)} placeholder="ej: Juan Pérez" style={inp} /></Field>
+      <Field label="Destino (obra / cliente)"><input value={destino} onChange={e => setDestino(e.target.value)} placeholder="ej: Obra Torre Maipú" style={inp} /></Field>
+      <div style={{ background: '#fff3e0', borderRadius: 8, padding: '9px 12px', fontSize: 12.5, color: '#e65100', margin: '4px 0 16px' }}>Se registra la salida de hoy. Los días afuera se cuentan solos hasta que vuelva.</div>
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => supervisor && onConfirm({ garrafaId: garrafa.id, supervisor, destino })} style={{ ...btnPri, flex: 1, background: '#e65100' }}>Registrar salida</button></div>
+    </ModalShell>
+  );
+}
+function ModalRegresoGarrafa({ garrafa, dias, onClose, onConfirm }) {
+  const [quienDevuelve, setQuienDevuelve] = useState(garrafa.supervisor || '');
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 4px', color: '#00897b' }}>Regreso de garrafa (vacía)</h3>
+      <p style={{ margin: '0 0 14px', fontSize: 14, color: '#555' }}>Garrafa <b>{garrafa.codigo}</b> · salió el {new Date(garrafa.salida).toLocaleDateString('es-AR')} con {garrafa.supervisor}</p>
+      <div style={{ background: '#e8f5e9', borderRadius: 9, padding: '12px 14px', marginBottom: 14, fontSize: 14, color: '#2e7d32' }}>Estuvo afuera: <b>{dias} día{dias !== 1 ? 's' : ''}</b> (cálculo automático)</div>
+      <Field label="¿Quién devuelve la garrafa vacía?"><input value={quienDevuelve} onChange={e => setQuienDevuelve(e.target.value)} placeholder="ej: Juan Pérez" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => quienDevuelve && onConfirm({ garrafaId: garrafa.id, quienDevuelve })} style={{ ...btnPri, flex: 1, background: '#00897b' }}>Confirmar regreso</button></div>
+    </ModalShell>
+  );
+}
+function ModalNuevaGarrafa({ onClose, onConfirm }) {
+  const [f, setF] = useState({ gas: 'R410a', num: '', tg: 'Garrafa 13,60 KG', ma: '' });
+  const codigo = f.gas.toUpperCase() + (f.num ? '-' + f.num : '');
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 16px', color: '#0288d1' }}>Registrar nueva garrafa</h3>
+      <Field label="Tipo de gas"><select value={f.gas} onChange={e => setF({ ...f, gas: e.target.value })} style={inp}><option>R410a</option><option>R134a</option><option>R22</option><option>R32</option><option>R407c</option></select></Field>
+      <Field label="N° de garrafa (lo asigna logística)"><input value={f.num} onChange={e => setF({ ...f, num: e.target.value })} placeholder="ej: 10" style={inp} /></Field>
+      <Field label="Tipo / peso"><input value={f.tg} onChange={e => setF({ ...f, tg: e.target.value })} style={inp} /></Field>
+      <Field label="Marca"><input value={f.ma} onChange={e => setF({ ...f, ma: e.target.value })} style={inp} /></Field>
+      <div style={{ background: '#E1F5FE', borderRadius: 8, padding: '9px 12px', fontSize: 13, color: '#01579b', margin: '4px 0 16px' }}>Código: <b>{codigo || '(falta n°)'}</b></div>
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.num && onConfirm({ ...f, codigo })} style={{ ...btnPri, flex: 1, background: '#0288d1' }}>Registrar</button></div>
+    </ModalShell>
+  );
+}
+
+// ========================= CAÑERÍA DE COBRE =========================
+function Cobre({ rol, usuario }) {
+  const [cobre, setCobre] = useState([]);
+  const [movs, setMovs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const esDeposito = rol === 'deposito';
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const [c, m] = await Promise.all([
+      supabase.from('cobre').select('*').order('id'),
+      supabase.from('movimientos_cobre').select('*').order('fecha', { ascending: false }).limit(50),
+    ]);
+    setCobre(c.data || []); setMovs(m.data || []); setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const registrarMov = async (d) => {
+    const { tipo, item, metros, destino } = d;
+    const nuevo = tipo === 'entrada' ? Number(item.metros) + metros : Math.max(0, Number(item.metros) - metros);
+    await supabase.from('cobre').update({ metros: nuevo }).eq('id', item.id);
+    await supabase.from('movimientos_cobre').insert({ cobre_id: item.id, tipo, medida: item.medida, deposito: item.deposito, metros, destino: tipo === 'salida' ? destino : null, usuario: usuario.nombre });
+    setModal(null); cargar();
+  };
+  const agregarMedida = async (d) => { await supabase.from('cobre').insert({ medida: d.medida, deposito: d.dep, metros: d.metros }); setModal(null); cargar(); };
+  const editarMedida = async (d) => { await supabase.from('cobre').update({ medida: d.medida }).eq('id', d.id); setModal(null); cargar(); };
+
+  const fmt = (iso) => new Date(iso).toLocaleDateString('es-AR');
+  return (
+    <div>
+      <SectionTitle icon={Wrench} title="Cañería de Cobre" sub="Control por metros · medidas en pulgadas" accion={<BotonRefrescar onClick={cargar} />} />
+      <div style={{ background: '#FFF8E1', border: '1px solid #ffe082', borderRadius: 11, padding: '13px 16px', marginBottom: 18, fontSize: 13.5, color: '#7c5800' }}>
+        <b>Stock en metros.</b> Podés agregar o modificar medidas. {!esDeposito && <span>Solo <b>Depósito/Logística</b> registra entradas/salidas.</span>}
+      </div>
+      {loading ? <Cargando /> : <>
+        <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)', marginBottom: 22 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 500 }}>
+            <thead><tr style={{ background: '#b8860b', color: '#fff', textAlign: 'left' }}>
+              <th style={th}>Medida (pulg.)</th><th style={th}>Depósito</th><th style={{ ...th, textAlign: 'center' }}>Metros</th>{esDeposito && <th style={{ ...th, textAlign: 'center', width: 260 }}>Acciones</th>}
+            </tr></thead>
+            <tbody>
+              {cobre.map(c => (
+                <tr key={c.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={td}><b style={{ fontSize: 15, color: '#7c5800' }}>{c.medida}&quot;</b></td>
+                  <td style={td}><DepBadge dep={c.deposito} /></td>
+                  <td style={{ ...td, textAlign: 'center' }}><span style={{ fontSize: 18, fontWeight: 800, color: c.metros == 0 ? '#e53935' : '#7c5800' }}>{c.metros} m</span></td>
+                  {esDeposito && <td style={{ ...td, textAlign: 'center' }}>
+                    <button onClick={() => setModal({ tipo: 'entrada', item: c })} style={{ ...btnMini, background: '#00897b', marginRight: 5 }}><ArrowDownToLine size={13} /> Entra</button>
+                    <button onClick={() => setModal({ tipo: 'salida', item: c })} disabled={c.metros == 0} style={{ ...btnMini, background: c.metros == 0 ? '#ddd' : '#e65100', marginRight: 5, cursor: c.metros == 0 ? 'not-allowed' : 'pointer' }}><ArrowUpFromLine size={13} /> Sale</button>
+                    <button onClick={() => setModal({ tipo: 'editar', item: c })} style={{ ...btnMini, background: '#607d8b' }}><Edit3 size={13} /></button>
+                  </td>}
+                </tr>))}
+            </tbody>
+          </table>
+        </div>
+        {esDeposito && <button onClick={() => setModal({ tipo: 'nueva' })} style={{ ...btnPri, background: '#b8860b', marginBottom: 22 }}><Plus size={16} /> Agregar medida</button>}
+        <Card title={`Historial de movimientos (${movs.length})`}>
+          {movs.length === 0 ? <Empty texto="Sin movimientos registrados" /> : (
+            <div style={{ overflowX: 'auto' }}><table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 600 }}>
+              <thead><tr style={{ textAlign: 'left', color: '#888', borderBottom: '2px solid #eee' }}>
+                <th style={thb}>Fecha</th><th style={thb}>Tipo</th><th style={thb}>Medida</th><th style={thb}>Depósito</th><th style={thb}>Destino</th><th style={thb}>Metros</th><th style={thb}>Usuario</th>
+              </tr></thead>
+              <tbody>{movs.map(m => (
+                <tr key={m.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                  <td style={tdb}>{fmt(m.fecha)}</td>
+                  <td style={tdb}><span style={{ color: m.tipo === 'entrada' ? '#00897b' : '#e65100', fontWeight: 700 }}>{m.tipo === 'entrada' ? '↓ Entrada' : '↑ Salida'}</span></td>
+                  <td style={tdb}><b>{m.medida}&quot;</b></td><td style={tdb}>{m.deposito}</td><td style={tdb}>{m.destino || '—'}</td><td style={tdb}><b>{m.metros} m</b></td><td style={tdb}>{m.usuario}</td>
+                </tr>))}</tbody>
+            </table></div>
+          )}
+        </Card>
+      </>}
+      {(modal?.tipo === 'entrada' || modal?.tipo === 'salida') && <ModalMovCobre data={modal} onClose={() => setModal(null)} onConfirm={registrarMov} />}
+      {modal?.tipo === 'nueva' && <ModalNuevaMedida onClose={() => setModal(null)} onConfirm={agregarMedida} />}
+      {modal?.tipo === 'editar' && <ModalEditarMedida item={modal.item} onClose={() => setModal(null)} onConfirm={editarMedida} />}
+    </div>
+  );
+}
+function ModalMovCobre({ data, onClose, onConfirm }) {
+  const { tipo, item } = data;
+  const [metros, setMetros] = useState(1);
+  const [destino, setDestino] = useState('');
+  const entrada = tipo === 'entrada';
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 4px', color: entrada ? '#00897b' : '#e65100' }}>{entrada ? 'Entrada' : 'Salida'} de cañería</h3>
+      <p style={{ margin: '0 0 16px', fontSize: 14, color: '#555' }}>Medida <b>{item.medida}&quot;</b> · {item.deposito} · stock {item.metros} m</p>
+      <Field label="Metros"><input type="number" step="0.5" value={metros} onChange={e => setMetros(Math.max(0.5, parseFloat(e.target.value) || 0.5))} style={inp} /></Field>
+      {!entrada && <Field label="Destino (base u obra)"><input value={destino} onChange={e => setDestino(e.target.value)} placeholder="ej: Obra Quilmes" style={inp} /></Field>}
+      <div style={{ background: entrada ? '#e8f5e9' : '#fff3e0', borderRadius: 8, padding: '9px 12px', fontSize: 13, margin: '4px 0 16px', color: entrada ? '#2e7d32' : '#e65100' }}>Nuevo stock: <b>{entrada ? Number(item.metros) + metros : Math.max(0, Number(item.metros) - metros)} m</b></div>
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => onConfirm({ tipo, item, metros, destino })} style={{ ...btnPri, flex: 1, background: entrada ? '#00897b' : '#e65100' }}>Confirmar</button></div>
+    </ModalShell>
+  );
+}
+function ModalNuevaMedida({ onClose, onConfirm }) {
+  const [f, setF] = useState({ medida: '', metros: 0, dep: 'Caseros' });
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 16px', color: '#b8860b' }}>Agregar medida de cañería</h3>
+      <Field label="Medida (pulgadas)"><input value={f.medida} onChange={e => setF({ ...f, medida: e.target.value })} placeholder="ej: 1-1/8" style={inp} /></Field>
+      <Field label="Depósito"><select value={f.dep} onChange={e => setF({ ...f, dep: e.target.value })} style={inp}><option>Caseros</option><option>Mataderos</option></select></Field>
+      <Field label="Metros iniciales"><input type="number" value={f.metros} onChange={e => setF({ ...f, metros: parseFloat(e.target.value) || 0 })} style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.medida && onConfirm(f)} style={{ ...btnPri, flex: 1, background: '#b8860b' }}>Agregar</button></div>
+    </ModalShell>
+  );
+}
+function ModalEditarMedida({ item, onClose, onConfirm }) {
+  const [medida, setMedida] = useState(item.medida);
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 16px', color: '#607d8b' }}>Modificar medida</h3>
+      <Field label="Medida (pulgadas)"><input value={medida} onChange={e => setMedida(e.target.value)} style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => onConfirm({ id: item.id, medida })} style={{ ...btnPri, flex: 1, background: '#607d8b' }}>Guardar</button></div>
+    </ModalShell>
+  );
+}
+
+// ========================= CARRITO =========================
+function Carrito({ usuario, onIrPedidos }) {
+  const carrito = useCarrito();
+  const [datos, setDatos] = useState({ presupuesto: '', obra: '', cliente: '' });
+  const [guardando, setGuardando] = useState(false);
+  const cambiarQty = (id, delta) => carritoStore.set(carrito.map(c => c.id === id ? { ...c, qty: Math.max(1, c.qty + delta) } : c));
+  const quitar = (id) => carritoStore.set(carrito.filter(c => c.id !== id));
+
+  const confirmar = async () => {
+    setGuardando(true);
+    // numeración correlativa
+    const { data: cont } = await supabase.from('contador_pedidos').select('ultimo').eq('id', 1).single();
+    const nuevoNum = (cont?.ultimo || 0) + 1;
+    const numero = String(nuevoNum).padStart(4, '0');
+    const { data: pedido } = await supabase.from('pedidos').insert({
+      numero, solicitante: usuario.nombre, mail: usuario.mail,
+      presupuesto: datos.presupuesto || null, obra: datos.obra || null, cliente: datos.cliente || null, estado: 'pendiente',
+    }).select().single();
+    if (pedido) {
+      await supabase.from('pedido_items').insert(carrito.map(c => ({ pedido_id: pedido.id, producto_id: c.id, nombre: c.n, marca: c.ma, deposito: c.dep, cantidad: c.qty })));
+      await supabase.from('contador_pedidos').update({ ultimo: nuevoNum }).eq('id', 1);
+    }
+    carritoStore.set([]);
+    setGuardando(false);
+    onIrPedidos();
+  };
+
+  return (
+    <div>
+      <SectionTitle icon={ShoppingCart} title="Mi Pedido" sub="Armá tu solicitud y confirmala" />
+      {carrito.length === 0 ? <Card><Empty texto="Tu pedido está vacío. Andá a 'Stock General' y agregá productos con el botón Pedir." /></Card>
+        : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 }}>
+          <Card title={`Productos solicitados (${carrito.length})`}>
+            {carrito.map(c => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f0f0f0' }}>
+                <div style={{ flex: 1 }}><b style={{ fontSize: 14, color: '#222' }}>{c.n}</b><div style={{ fontSize: 12, color: '#999' }}>{c.ma} · {c.dep} · disp: {c.disp}</div></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                  <button onClick={() => cambiarQty(c.id, -1)} style={qtyBtnSm}><Minus size={13} /></button>
+                  <span style={{ fontWeight: 700, minWidth: 22, textAlign: 'center' }}>{c.qty}</span>
+                  <button onClick={() => cambiarQty(c.id, 1)} style={qtyBtnSm}><Plus size={13} /></button>
+                </div>
+                <button onClick={() => quitar(c.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#e53935' }}><XCircle size={18} /></button>
+              </div>))}
+          </Card>
+          <Card title="Datos del pedido">
+            <Field label="N° de Presupuesto"><input value={datos.presupuesto} onChange={e => setDatos({ ...datos, presupuesto: e.target.value })} placeholder="ej: PPTO-1234" style={inp} /></Field>
+            <Field label="Obra"><input value={datos.obra} onChange={e => setDatos({ ...datos, obra: e.target.value })} placeholder="ej: Torre Maipú P20" style={inp} /></Field>
+            <Field label="Cliente"><input value={datos.cliente} onChange={e => setDatos({ ...datos, cliente: e.target.value })} placeholder="ej: Banco Galicia" style={inp} /></Field>
+            <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '11px 13px', margin: '6px 0 14px', fontSize: 12.5, color: '#666' }}>Solicitante: <b>{usuario.nombre}</b><br />Queda pendiente de aprobación del dueño.</div>
+            <button onClick={confirmar} disabled={guardando} style={{ ...btnPri, width: '100%', justifyContent: 'center', opacity: guardando ? .6 : 1 }}><CheckCircle2 size={17} /> {guardando ? 'Guardando...' : 'Confirmar pedido'}</button>
+          </Card>
+        </div>}
+    </div>
+  );
+}
+
+// ========================= PEDIDOS =========================
+function Pedidos({ rol, usuario }) {
+  const [pedidos, setPedidos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filtro, setFiltro] = useState('Todos');
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('pedidos').select('*, pedido_items(*)').order('creado_en', { ascending: false });
+    setPedidos(data || []); setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const aprobar = async (id) => { await supabase.from('pedidos').update({ estado: 'aprobado' }).eq('id', id); cargar(); };
+  const rechazar = async (id) => { await supabase.from('pedidos').update({ estado: 'rechazado' }).eq('id', id); cargar(); };
+  const eliminar = async (id) => { await supabase.from('pedidos').delete().eq('id', id); setConfirmDel(null); cargar(); };
+  const entregar = async (pedido) => {
+    for (const it of pedido.pedido_items) {
+      if (it.producto_id) {
+        const { data: prod } = await supabase.from('productos').select('cantidad').eq('id', it.producto_id).single();
+        if (prod) await supabase.from('productos').update({ cantidad: Math.max(0, prod.cantidad - it.cantidad) }).eq('id', it.producto_id);
+      }
+    }
+    await supabase.from('pedidos').update({ estado: 'entregado' }).eq('id', pedido.id);
+    cargar();
+  };
+
+  const puedeBorrar = (p) => rol === 'dueno' || rol === 'deposito' || (rol === 'supervisor' && p.mail === usuario.mail);
+  const lista = filtro === 'Todos' ? pedidos : pedidos.filter(p => p.estado === filtro);
+  const fmt = (iso) => new Date(iso).toLocaleString('es-AR');
+
+  return (
+    <div>
+      <SectionTitle icon={ClipboardList} title="Pedidos" sub="Registro y seguimiento de solicitudes" accion={<BotonRefrescar onClick={cargar} />} />
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {['Todos', 'pendiente', 'aprobado', 'entregado', 'rechazado'].map(f => (
+          <button key={f} onClick={() => setFiltro(f)} style={{ padding: '7px 14px', borderRadius: 20, border: '1.5px solid ' + (filtro === f ? AZUL : '#ddd'), background: filtro === f ? AZUL : '#fff', color: filtro === f ? '#fff' : '#666', fontSize: 13, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize' }}>{f}</button>))}
+      </div>
+      {loading ? <Cargando /> : lista.length === 0 ? <Card><Empty texto="No hay pedidos en este estado" /></Card>
+        : lista.map(p => (
+          <div key={p.id} style={{ background: '#fff', borderRadius: 13, padding: 20, marginBottom: 14, boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><span style={{ fontSize: 19, fontWeight: 800, color: AZUL }}>Pedido #{p.numero}</span><EstadoBadge estado={p.estado} /></div>
+                <div style={{ fontSize: 12.5, color: '#999', marginTop: 4 }}>{fmt(p.creado_en)}</div>
+              </div>
+              {puedeBorrar(p) && <button onClick={() => setConfirmDel(p)} style={{ background: '#fff', border: '1.5px solid #ffcdd2', color: '#c62828', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 600 }}><Trash2 size={15} /> Eliminar</button>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14, fontSize: 13 }}>
+              <Info icon={User} label="Solicitante" value={p.solicitante} />
+              <Info icon={FileText} label="Presupuesto" value={p.presupuesto || '—'} />
+              <Info icon={Building2} label="Obra" value={p.obra || '—'} />
+              <Info icon={User} label="Cliente" value={p.cliente || '—'} />
+            </div>
+            <div style={{ background: '#F8F9FC', borderRadius: 9, padding: '10px 14px', marginBottom: 14 }}>
+              {(p.pedido_items || []).map((it, i) => (<div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}><span>{it.nombre} <span style={{ color: '#aaa' }}>· {it.deposito}</span></span><b>x{it.cantidad}</b></div>))}
+            </div>
+            {rol === 'dueno' && p.estado === 'pendiente' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => aprobar(p.id)} style={{ ...btnPri, background: '#2e7d32' }}><CheckCircle2 size={16} /> Aprobar</button>
+              <button onClick={() => rechazar(p.id)} style={{ ...btnSec, color: '#c62828', borderColor: '#c62828' }}><XCircle size={16} /> Rechazar</button></div>}
+            {rol === 'deposito' && p.estado === 'aprobado' && <button onClick={() => entregar(p)} style={{ ...btnPri, background: '#00897b' }}><ArrowUpFromLine size={16} /> Marcar entregado (descuenta stock)</button>}
+            {rol === 'deposito' && p.estado === 'pendiente' && <div style={{ fontSize: 13, color: '#f57c00', fontWeight: 600 }}>⏳ Esperando aprobación del dueño para poder entregar</div>}
+          </div>))}
+      {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
+        <h3 style={{ margin: '0 0 8px', color: '#c62828' }}>Eliminar pedido #{confirmDel.numero}</h3>
+        <p style={{ fontSize: 14, color: '#555', margin: '0 0 18px' }}>Esta acción no se puede deshacer. ¿Seguro?</p>
+        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminar(confirmDel.id)} style={{ ...btnPri, flex: 1, background: '#c62828' }}><Trash2 size={16} /> Sí, eliminar</button></div>
+      </ModalShell>}
+    </div>
+  );
+}
+
+// ========================= AUXILIARES =========================
+function SectionTitle({ icon: Icon, title, sub, accion }) {
+  return (
+    <div style={{ marginBottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+      <div><h1 style={{ margin: 0, fontSize: 25, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: 10 }}><Icon size={26} color={AZUL} /> {title}</h1>{sub && <p style={{ margin: '4px 0 0', color: '#888', fontSize: 14 }}>{sub}</p>}</div>
+      {accion}
+    </div>
+  );
+}
+function BotonRefrescar({ onClick }) { return <button onClick={onClick} style={{ ...btnSec, padding: '8px 14px' }}><RefreshCw size={15} /> Actualizar</button>; }
+function Card({ title, children }) { return <div style={{ background: '#fff', borderRadius: 13, padding: 20, boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>{title && <h3 style={{ margin: '0 0 14px', fontSize: 16, color: '#333' }}>{title}</h3>}{children}</div>; }
+function Empty({ texto }) { return <div style={{ textAlign: 'center', padding: '30px 20px', color: '#aaa', fontSize: 14 }}><Package size={36} style={{ opacity: .3, marginBottom: 8 }} /><div>{texto}</div></div>; }
+function Cargando() { return <div style={{ textAlign: 'center', padding: 50, color: '#999' }}><RefreshCw size={28} style={{ animation: 'spin 1s linear infinite' }} /><div style={{ marginTop: 10, fontSize: 14 }}>Cargando...</div><style>{'@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}'}</style></div>; }
+function Select({ value, onChange, options }) { return <select value={value} onChange={e => onChange(e.target.value)} style={{ padding: '10px 14px', borderRadius: 9, border: '1.5px solid #ddd', fontSize: 14, background: '#fff', cursor: 'pointer', outline: 'none' }}>{options.map(o => <option key={o}>{o}</option>)}</select>; }
+function Field({ label, children }) { return <div style={{ marginBottom: 12 }}><label style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 5 }}>{label}</label>{children}</div>; }
+function Info({ icon: Icon, label, value }) { return <div style={{ background: '#F8F9FC', borderRadius: 8, padding: '8px 11px' }}><div style={{ fontSize: 11, color: '#999', display: 'flex', alignItems: 'center', gap: 4 }}><Icon size={12} /> {label}</div><div style={{ fontSize: 13.5, fontWeight: 600, color: '#333', marginTop: 2 }}>{value}</div></div>; }
+function EstadoBadge({ estado }) { const map = { pendiente: ['#fff3e0', '#e65100', 'Pendiente'], aprobado: ['#e8f5e9', '#2e7d32', 'Aprobado'], entregado: ['#e3f2fd', '#1565c0', 'Entregado'], rechazado: ['#ffebee', '#c62828', 'Rechazado'] }; const [bg, col, txt] = map[estado] || map.pendiente; return <span style={{ background: bg, color: col, fontSize: 12, fontWeight: 700, padding: '3px 11px', borderRadius: 20 }}>{txt}</span>; }
+function DepBadge({ dep }) { const col = dep === 'Caseros' ? AZUL : '#00897b'; return <span style={{ background: col + '15', color: col, fontSize: 11.5, fontWeight: 600, padding: '3px 9px', borderRadius: 6 }}>{dep}</span>; }
+function ModalShell({ children, onClose }) { return <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,30,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 16 }}><div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 15, padding: 28, width: 430, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,0,.3)' }}>{children}</div></div>; }
+function gasColor(g) { const m = { r410a: '#0288d1', r134a: '#7b1fa2', r22: '#e65100', r32: '#2e7d32' }; return m[(g || '').toLowerCase()] || '#0288d1'; }
+
+const th = { padding: '13px 16px', fontSize: 12.5, fontWeight: 700, letterSpacing: '.3px' };
+const td = { padding: '11px 16px', verticalAlign: 'middle' };
+const thb = { padding: '8px 10px', fontSize: 11.5, fontWeight: 700 };
+const tdb = { padding: '8px 10px', color: '#555' };
+const inp = { width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none' };
+const btnPri = { display: 'flex', alignItems: 'center', gap: 7, padding: '11px 18px', background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 14.5, fontWeight: 700, cursor: 'pointer' };
+const btnSec = { display: 'flex', alignItems: 'center', gap: 7, padding: '11px 18px', background: '#fff', color: '#666', border: '1.5px solid #ddd', borderRadius: 9, fontSize: 14.5, fontWeight: 600, cursor: 'pointer' };
+const btnMini = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 11px', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+const qtyBtn = { width: 38, height: 38, borderRadius: 8, border: '1.5px solid #ddd', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const qtyBtnSm = { width: 28, height: 28, borderRadius: 7, border: '1.5px solid #ddd', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };

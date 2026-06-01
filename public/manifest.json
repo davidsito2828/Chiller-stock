@@ -1,0 +1,13 @@
+{
+  "name": "Chiller System — Control de Stock",
+  "short_name": "Chiller Stock",
+  "description": "Control de stock y pedidos",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0000DE",
+  "theme_color": "#0000DE",
+  "icons": [
+    { "src": "/logo-chillersystem.jpeg", "sizes": "192x192", "type": "image/jpeg" },
+    { "src": "/logo-chillersystem.jpeg", "sizes": "512x512", "type": "image/jpeg" }
+  ]
+}
