@@ -78,17 +78,29 @@ function Login({ onLogin }) {
   const [error, setError] = useState('');
   const [paso, setPaso] = useState('mail');
   const [datosMail, setDatosMail] = useState(null);
+  const [cargando, setCargando] = useState(false);
 
-  const validar = () => {
+  const validar = async () => {
     const m = mail.trim().toLowerCase();
     if (!m.endsWith('@chillersystem.com')) {
       setError('El acceso es solo con tu correo corporativo @chillersystem.com');
       return;
     }
-    if (m === 'david.cufre@chillersystem.com') { onLogin({ mail: m, nombre: 'David Cufré', rol: 'supervisor' }); return; }
+    setCargando(true);
+    const { data: existente } = await supabase.from('usuarios').select('*').eq('mail', m).maybeSingle();
+    setCargando(false);
+    if (existente) {
+      onLogin({ mail: existente.mail, nombre: existente.nombre, rol: existente.rol });
+      return;
+    }
     const nombre = m.split('@')[0].replace(/\./g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     setDatosMail({ mail: m, nombre });
     setPaso('rol');
+  };
+
+  const elegirRol = async (rol) => {
+    await supabase.from('usuarios').insert({ mail: datosMail.mail, nombre: datosMail.nombre, rol });
+    onLogin({ ...datosMail, rol });
   };
 
   return (
@@ -104,22 +116,22 @@ function Login({ onLogin }) {
           <input value={mail} onChange={e => { setMail(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && validar()}
             placeholder="nombre@chillersystem.com" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 4, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
           {error && <p style={{ color: '#d32f2f', fontSize: 12.5, margin: '4px 0' }}>{error}</p>}
-          <button onClick={validar} style={{ width: '100%', marginTop: 14, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <LogIn size={18} /> Continuar
+          <button onClick={validar} disabled={cargando} style={{ width: '100%', marginTop: 14, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: cargando ? .6 : 1 }}>
+            <LogIn size={18} /> {cargando ? 'Verificando...' : 'Continuar'}
           </button>
           <p style={{ marginTop: 18, fontSize: 12, color: '#999', textAlign: 'center' }}>Cualquier correo <b>@chillersystem.com</b> tiene acceso.</p>
         </>}
         {paso === 'rol' && <>
           <p style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 4 }}>Hola <b>{datosMail.nombre}</b></p>
-          <p style={{ fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 16 }}>¿Con qué rol vas a trabajar?</p>
+          <p style={{ fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 16 }}>¿Con qué rol vas a trabajar?<br /><span style={{ fontSize: 11.5, color: '#aaa' }}>Se elige una sola vez.</span></p>
           {[['supervisor', 'Supervisor / Técnico', 'Consulta stock y solicita pedidos'],
-            ['deposito', 'Depósito / Logística', 'Carga stock, entrega y mueve refrigerantes/cañería'],
-            ['dueno', 'Dueño / Gerencia', 'Aprueba pedidos y ve todo']].map(([r, t, d]) => (
-            <button key={r} onClick={() => onLogin({ ...datosMail, rol: r })}
+            ['deposito', 'Depósito / Logística', 'Carga stock, entrega y mueve refrigerantes/cañería']].map(([r, t, d]) => (
+            <button key={r} onClick={() => elegirRol(r)}
               style={{ width: '100%', textAlign: 'left', padding: '13px 15px', marginBottom: 9, borderRadius: 10, border: '1.5px solid #e0e0e0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 11 }}>
               <ArrowRight size={16} color={AZUL} />
               <div><div style={{ fontWeight: 700, fontSize: 14.5, color: '#222' }}>{t}</div><div style={{ fontSize: 12, color: '#999' }}>{d}</div></div>
             </button>))}
+          <div style={{ background: '#FFF8E1', border: '1px solid #ffe082', borderRadius: 9, padding: '10px 12px', margin: '4px 0 10px', fontSize: 11.5, color: '#7c5800' }}>El rol de <b>Gerencia/Dueño</b> está reservado y no puede autoasignarse. Si necesitás otro rol, avisá a David.</div>
           <button onClick={() => setPaso('mail')} style={{ width: '100%', marginTop: 4, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
         </>}
       </div>
