@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw } from 'lucide-react';
+import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar } from 'lucide-react';
 
 const AZUL = '#0000DE';
 const AZUL_OSC = '#0000A8';
@@ -45,6 +45,7 @@ export default function Home() {
           {vista === 'stock' && <Stock rol={rol} usuario={usuario} />}
           {vista === 'refrigerantes' && <Refrigerantes rol={rol} usuario={usuario} />}
           {vista === 'cobre' && <Cobre rol={rol} usuario={usuario} />}
+          {vista === 'vehiculos' && <Vehiculos rol={rol} usuario={usuario} />}
           {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => setVista('pedidos')} />}
           {vista === 'pedidos' && <Pedidos rol={rol} usuario={usuario} />}
         </main>
@@ -163,6 +164,7 @@ function Sidebar({ vista, setVista, rol }) {
     { id: 'stock', label: 'Stock General', icon: Boxes, roles: ['supervisor', 'dueno', 'deposito'] },
     { id: 'refrigerantes', label: 'Refrigerantes', icon: Droplets, roles: ['supervisor', 'dueno', 'deposito'] },
     { id: 'cobre', label: 'Cañería de Cobre', icon: Wrench, roles: ['supervisor', 'dueno', 'deposito'] },
+    { id: 'vehiculos', label: 'Vehículos', icon: Truck, roles: ['supervisor', 'dueno', 'deposito'] },
     { id: 'carrito', label: 'Mi Pedido', icon: ShoppingCart, roles: ['supervisor'], badge: carrito.length },
     { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'dueno', 'deposito'] },
   ];
@@ -268,7 +270,9 @@ function Stock({ rol, usuario }) {
   const [dep, setDep] = useState('Todos');
   const [cat, setCat] = useState('Todas');
   const [modalEntrada, setModalEntrada] = useState(null);
+  const [modalNuevo, setModalNuevo] = useState(false);
   const carrito = useCarrito();
+  const esDeposito = rol === 'deposito';
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -278,7 +282,13 @@ function Stock({ rol, usuario }) {
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const categorias = useMemo(() => ['Todas', ...Array.from(new Set(stock.map(s => s.categoria).filter(Boolean))).sort()], [stock]);
+  // Rubros fijos + los que ya existan en la base
+  const RUBROS = ['Herramientas', 'Insumos', 'Materiales', 'Repuestos'];
+  const categorias = useMemo(() => {
+    const enBase = Array.from(new Set(stock.map(s => s.categoria).filter(Boolean)));
+    const todos = Array.from(new Set([...RUBROS, ...enBase])).sort();
+    return ['Todas', ...todos];
+  }, [stock]);
   const filtrado = useMemo(() => {
     const q = busca.toLowerCase();
     return stock.filter(s => (dep === 'Todos' || s.deposito === dep) && (cat === 'Todas' || s.categoria === cat) &&
@@ -299,9 +309,15 @@ function Stock({ rol, usuario }) {
     cargar();
   };
 
+  const crearProducto = async (p) => {
+    await supabase.from('productos').insert({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, deposito: p.deposito, cantidad: p.cantidad });
+    setModalNuevo(false);
+    cargar();
+  };
+
   return (
     <div>
-      <SectionTitle icon={Boxes} title="Stock General" sub={`${stock.length} ítems · Caseros + Mataderos`} accion={<BotonRefrescar onClick={cargar} />} />
+      <SectionTitle icon={Boxes} title="Stock General" sub={`${stock.length} ítems · Caseros + Mataderos`} accion={esDeposito ? <button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar producto</button> : <BotonRefrescar onClick={cargar} />} />
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
           <Search size={17} color="#999" style={{ position: 'absolute', left: 12, top: 11 }} />
@@ -313,9 +329,9 @@ function Stock({ rol, usuario }) {
       </div>
       {loading ? <Cargando /> : (
         <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 700 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 760 }}>
             <thead><tr style={{ background: AZUL, color: '#fff', textAlign: 'left' }}>
-              <th style={th}>Producto</th><th style={th}>Marca / Modelo</th><th style={th}>Código</th><th style={th}>Depósito</th>
+              <th style={th}>Producto</th><th style={th}>Marca / Modelo</th><th style={th}>Rubro</th><th style={th}>Código</th><th style={th}>Depósito</th>
               <th style={{ ...th, textAlign: 'center' }}>Cant.</th><th style={{ ...th, textAlign: 'center', width: 150 }}>Acción</th>
             </tr></thead>
             <tbody>
@@ -323,6 +339,7 @@ function Stock({ rol, usuario }) {
                 <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><b style={{ color: '#222' }}>{s.nombre}</b>{s.descripcion && <div style={{ fontSize: 11.5, color: '#999' }}>{s.descripcion}</div>}</td>
                   <td style={td}>{s.marca}{s.modelo && <span style={{ color: '#999' }}> · {s.modelo}</span>}</td>
+                  <td style={td}><RubroBadge rubro={s.categoria} /></td>
                   <td style={{ ...td, fontFamily: 'monospace', fontSize: 12, color: '#777' }}>{s.codigo || '—'}</td>
                   <td style={td}><DepBadge dep={s.deposito} /></td>
                   <td style={{ ...td, textAlign: 'center' }}><span style={{ fontWeight: 700, color: s.cantidad === 0 ? '#e53935' : s.cantidad <= 2 ? '#f57c00' : '#222', fontSize: 15 }}>{s.cantidad}</span></td>
@@ -338,7 +355,34 @@ function Stock({ rol, usuario }) {
         </div>
       )}
       {modalEntrada && <ModalEntrada item={modalEntrada} onClose={() => setModalEntrada(null)} onConfirm={ingresar} />}
+      {modalNuevo && <ModalNuevoProducto rubros={['Herramientas', 'Insumos', 'Materiales', 'Repuestos']} onClose={() => setModalNuevo(false)} onConfirm={crearProducto} />}
     </div>
+  );
+}
+function RubroBadge({ rubro }) {
+  const colores = { Herramientas: '#8B5CF6', Insumos: '#0EA5E9', Materiales: '#F59E0B', Repuestos: '#10B981' };
+  const col = colores[rubro] || '#64748b';
+  return <span style={{ background: col + '18', color: col, fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 6 }}>{rubro || 'General'}</span>;
+}
+function ModalNuevoProducto({ rubros, onClose, onConfirm }) {
+  const [f, setF] = useState({ nombre: '', marca: '', modelo: '', codigo: '', descripcion: '', categoria: 'Insumos', deposito: 'Caseros', cantidad: 1 });
+  const set = (k, v) => setF({ ...f, [k]: v });
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 16px', color: AZUL }}>Agregar producto nuevo</h3>
+      <Field label="Nombre del producto *"><input value={f.nombre} onChange={e => set('nombre', e.target.value)} placeholder="ej: Manómetro digital" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Marca"><input value={f.marca} onChange={e => set('marca', e.target.value)} style={inp} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Modelo"><input value={f.modelo} onChange={e => set('modelo', e.target.value)} style={inp} /></Field></div>
+      </div>
+      <Field label="Código"><input value={f.codigo} onChange={e => set('codigo', e.target.value)} placeholder="opcional" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Rubro"><select value={f.categoria} onChange={e => set('categoria', e.target.value)} style={inp}>{rubros.map(r => <option key={r}>{r}</option>)}</select></Field></div>
+        <div style={{ flex: 1 }}><Field label="Depósito"><select value={f.deposito} onChange={e => set('deposito', e.target.value)} style={inp}><option>Caseros</option><option>Mataderos</option></select></Field></div>
+      </div>
+      <Field label="Cantidad inicial"><input type="number" value={f.cantidad} onChange={e => set('cantidad', parseInt(e.target.value) || 0)} style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.nombre && onConfirm(f)} style={{ ...btnPri, flex: 1 }}>Agregar</button></div>
+    </ModalShell>
   );
 }
 function ModalEntrada({ item, onClose, onConfirm }) {
@@ -753,6 +797,206 @@ function Pedidos({ rol, usuario }) {
     </div>
   );
 }
+
+
+// ========================= VEHÍCULOS =========================
+function Vehiculos({ rol, usuario }) {
+  const [vehiculos, setVehiculos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+  const [detalle, setDetalle] = useState(null);
+  const puedeEditar = rol === 'deposito' || rol === 'dueno';
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('vehiculos').select('*').order('patente');
+    setVehiculos(data || []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const crear = async (v) => {
+    await supabase.from('vehiculos').insert({ patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio || null, km_actual: v.km_actual, km_ultimo_service: v.km_ultimo_service, km_cada_service: v.km_cada_service, asignado_a: v.asignado_a, notas: v.notas });
+    setModal(null); cargar();
+  };
+  const editar = async (id, v) => {
+    await supabase.from('vehiculos').update({ patente: v.patente, marca: v.marca, modelo: v.modelo, anio: v.anio || null, km_actual: v.km_actual, km_ultimo_service: v.km_ultimo_service, km_cada_service: v.km_cada_service, asignado_a: v.asignado_a, notas: v.notas }).eq('id', id);
+    setModal(null); cargar();
+  };
+  const eliminar = async (id) => { await supabase.from('vehiculos').delete().eq('id', id); setModal(null); cargar(); };
+
+  // Estado del service: km que faltan para el próximo
+  const estadoService = (v) => {
+    const proximo = (v.km_ultimo_service || 0) + (v.km_cada_service || 10000);
+    const faltan = proximo - v.km_actual;
+    if (faltan <= 0) return { txt: 'Service vencido', col: '#c62828', bg: '#ffebee', faltan, proximo };
+    if (faltan <= 1000) return { txt: `Service próximo (${faltan} km)`, col: '#e65100', bg: '#fff3e0', faltan, proximo };
+    return { txt: `Faltan ${faltan} km`, col: '#2e7d32', bg: '#e8f5e9', faltan, proximo };
+  };
+
+  const vencidos = vehiculos.filter(v => estadoService(v).faltan <= 0).length;
+  const proximos = vehiculos.filter(v => { const f = estadoService(v).faltan; return f > 0 && f <= 1000; }).length;
+
+  return (
+    <div>
+      <SectionTitle icon={Truck} title="Vehículos" sub="Control de kilometraje, services y reparaciones" accion={puedeEditar ? <button onClick={() => setModal({ tipo: 'nuevo' })} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar vehículo</button> : <BotonRefrescar onClick={cargar} />} />
+
+      {(vencidos > 0 || proximos > 0) && (
+        <div style={{ display: 'flex', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+          {vencidos > 0 && <div style={{ flex: 1, minWidth: 200, background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: 11, padding: '12px 16px', fontSize: 13.5, color: '#c62828', display: 'flex', alignItems: 'center', gap: 9 }}><AlertTriangle size={20} /> <b>{vencidos}</b> vehículo(s) con service VENCIDO</div>}
+          {proximos > 0 && <div style={{ flex: 1, minWidth: 200, background: '#fff3e0', border: '1px solid #ffe082', borderRadius: 11, padding: '12px 16px', fontSize: 13.5, color: '#e65100', display: 'flex', alignItems: 'center', gap: 9 }}><Clock size={20} /> <b>{proximos}</b> vehículo(s) con service próximo</div>}
+        </div>
+      )}
+
+      {loading ? <Cargando /> : vehiculos.length === 0 ? <Card><Empty texto="No hay vehículos cargados todavía" /></Card> : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 16 }}>
+          {vehiculos.map(v => {
+            const es = estadoService(v);
+            return (
+              <div key={v.id} style={{ background: '#fff', borderRadius: 13, padding: 18, boxShadow: '0 2px 12px rgba(0,0,0,.05)', borderTop: `4px solid ${es.col}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: '#1a1a1a', letterSpacing: '.5px' }}>{v.patente}</div>
+                    <div style={{ fontSize: 13, color: '#888' }}>{v.marca} {v.modelo}{v.anio ? ` · ${v.anio}` : ''}</div>
+                  </div>
+                  <Truck size={26} color={AZUL} />
+                </div>
+                {v.asignado_a && <div style={{ fontSize: 12, color: '#666', marginBottom: 8 }}><User size={12} style={{ verticalAlign: -2 }} /> {v.asignado_a}</div>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 22, fontWeight: 800, color: AZUL, margin: '6px 0' }}>
+                  <Gauge size={20} /> {v.km_actual.toLocaleString('es-AR')} <span style={{ fontSize: 13, color: '#999', fontWeight: 600 }}>km</span>
+                </div>
+                <div style={{ background: es.bg, color: es.col, borderRadius: 8, padding: '7px 11px', fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}>{es.txt}</div>
+                <div style={{ fontSize: 11.5, color: '#999', marginBottom: 12 }}>Último service: {(v.km_ultimo_service || 0).toLocaleString('es-AR')} km · cada {(v.km_cada_service || 0).toLocaleString('es-AR')} km</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => setDetalle(v)} style={{ ...btnSec, flex: 1, justifyContent: 'center', padding: '8px' }}><FileText size={14} /> Historial</button>
+                  {puedeEditar && <button onClick={() => setModal({ tipo: 'editar', vehiculo: v })} style={{ ...btnMini, background: '#607d8b', padding: '8px 12px' }}><Edit3 size={14} /></button>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {modal?.tipo === 'nuevo' && <ModalVehiculo onClose={() => setModal(null)} onConfirm={crear} />}
+      {modal?.tipo === 'editar' && <ModalVehiculo vehiculo={modal.vehiculo} onClose={() => setModal(null)} onConfirm={(v) => editar(modal.vehiculo.id, v)} onEliminar={() => eliminar(modal.vehiculo.id)} />}
+      {detalle && <ModalHistorialVehiculo vehiculo={detalle} puedeEditar={puedeEditar} usuario={usuario} onClose={() => setDetalle(null)} onActualizar={cargar} />}
+    </div>
+  );
+}
+
+function ModalVehiculo({ vehiculo, onClose, onConfirm, onEliminar }) {
+  const [f, setF] = useState(vehiculo ? { ...vehiculo } : { patente: '', marca: '', modelo: '', anio: '', km_actual: 0, km_ultimo_service: 0, km_cada_service: 10000, asignado_a: '', notas: '' });
+  const set = (k, v) => setF({ ...f, [k]: v });
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 16px', color: AZUL }}>{vehiculo ? 'Editar vehículo' : 'Agregar vehículo'}</h3>
+      <Field label="Patente *"><input value={f.patente} onChange={e => set('patente', e.target.value.toUpperCase())} placeholder="ej: AB123CD" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Marca"><input value={f.marca} onChange={e => set('marca', e.target.value)} placeholder="ej: Toyota" style={inp} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Modelo"><input value={f.modelo} onChange={e => set('modelo', e.target.value)} placeholder="ej: Hilux" style={inp} /></Field></div>
+        <div style={{ width: 80 }}><Field label="Año"><input type="number" value={f.anio} onChange={e => set('anio', parseInt(e.target.value) || '')} style={inp} /></Field></div>
+      </div>
+      <Field label="Asignado a (técnico / sector)"><input value={f.asignado_a} onChange={e => set('asignado_a', e.target.value)} placeholder="opcional" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Km actual"><input type="number" value={f.km_actual} onChange={e => set('km_actual', parseInt(e.target.value) || 0)} style={inp} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Km último service"><input type="number" value={f.km_ultimo_service} onChange={e => set('km_ultimo_service', parseInt(e.target.value) || 0)} style={inp} /></Field></div>
+      </div>
+      <Field label="Service cada (km)"><input type="number" value={f.km_cada_service} onChange={e => set('km_cada_service', parseInt(e.target.value) || 10000)} style={inp} /></Field>
+      <Field label="Notas"><input value={f.notas} onChange={e => set('notas', e.target.value)} placeholder="opcional" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
+        <button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button>
+        <button onClick={() => f.patente && onConfirm(f)} style={{ ...btnPri, flex: 1 }}>{vehiculo ? 'Guardar' : 'Agregar'}</button>
+      </div>
+      {vehiculo && onEliminar && <button onClick={onEliminar} style={{ width: '100%', marginTop: 10, padding: 9, background: '#fff', border: '1.5px solid #ffcdd2', color: '#c62828', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}><Trash2 size={14} style={{ verticalAlign: -2 }} /> Eliminar vehículo</button>}
+    </ModalShell>
+  );
+}
+
+function ModalHistorialVehiculo({ vehiculo, puedeEditar, usuario, onClose, onActualizar }) {
+  const [reparaciones, setReparaciones] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [agregando, setAgregando] = useState(false);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('reparaciones').select('*').eq('vehiculo_id', vehiculo.id).order('fecha', { ascending: false });
+    setReparaciones(data || []);
+    setLoading(false);
+  }, [vehiculo.id]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('es-AR');
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,30,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 15, padding: 26, width: 620, maxWidth: '100%', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,.3)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+          <h3 style={{ margin: 0, color: AZUL, fontSize: 19 }}>{vehiculo.patente} — Historial</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999' }}><XCircle size={22} /></button>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: '#888' }}>{vehiculo.marca} {vehiculo.modelo} · {vehiculo.km_actual.toLocaleString('es-AR')} km</p>
+
+        {puedeEditar && !agregando && <button onClick={() => setAgregando(true)} style={{ ...btnPri, marginBottom: 16 }}><Plus size={16} /> Registrar service / reparación</button>}
+        {agregando && <FormReparacion vehiculo={vehiculo} usuario={usuario} onCancel={() => setAgregando(false)} onGuardadoOk={() => { setAgregando(false); cargar(); onActualizar(); }} />}
+
+        {loading ? <Cargando /> : reparaciones.length === 0 ? <Empty texto="Sin registros todavía" /> : (
+          <div style={{ marginTop: 8 }}>
+            {reparaciones.map(r => (
+              <div key={r.id} style={{ borderLeft: `3px solid ${r.tipo === 'service' ? '#0EA5E9' : '#F59E0B'}`, background: '#F8F9FC', borderRadius: 8, padding: '11px 14px', marginBottom: 9 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13.5, color: r.tipo === 'service' ? '#0277bd' : '#e65100' }}>{r.tipo === 'service' ? '🔧 Service' : '🛠️ Reparación'}</span>
+                  <span style={{ fontSize: 12, color: '#999' }}><Calendar size={11} style={{ verticalAlign: -1 }} /> {fmt(r.fecha)}{r.km ? ` · ${r.km.toLocaleString('es-AR')} km` : ''}</span>
+                </div>
+                <div style={{ fontSize: 13.5, color: '#333' }}>{r.descripcion}</div>
+                <div style={{ fontSize: 12, color: '#999', marginTop: 3 }}>{r.taller ? `Taller: ${r.taller}` : ''}{r.costo ? ` · $${Number(r.costo).toLocaleString('es-AR')}` : ''}{r.usuario ? ` · ${r.usuario}` : ''}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FormReparacion({ vehiculo, usuario, onCancel, onGuardadoOk }) {
+  const [f, setF] = useState({ tipo: 'service', fecha: new Date().toISOString().slice(0, 10), km: vehiculo.km_actual, descripcion: '', costo: '', taller: '' });
+  const set = (k, v) => setF({ ...f, [k]: v });
+  const [guardando, setGuardando] = useState(false);
+
+  const guardar = async () => {
+    if (!f.descripcion) return;
+    setGuardando(true);
+    await supabase.from('reparaciones').insert({ vehiculo_id: vehiculo.id, tipo: f.tipo, fecha: f.fecha, km: f.km || null, descripcion: f.descripcion, costo: f.costo || null, taller: f.taller, usuario: usuario.nombre });
+    // si es service, actualizar km_ultimo_service y km_actual del vehículo
+    const upd = { km_actual: Math.max(vehiculo.km_actual, f.km || 0) };
+    if (f.tipo === 'service') upd.km_ultimo_service = f.km || vehiculo.km_actual;
+    await supabase.from('vehiculos').update(upd).eq('id', vehiculo.id);
+    setGuardando(false);
+    onGuardadoOk();
+  };
+
+  return (
+    <div style={{ background: '#F4F6FB', borderRadius: 11, padding: 16, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+        <button onClick={() => set('tipo', 'service')} style={{ flex: 1, padding: '9px', borderRadius: 8, border: '1.5px solid ' + (f.tipo === 'service' ? '#0EA5E9' : '#ddd'), background: f.tipo === 'service' ? '#0EA5E9' : '#fff', color: f.tipo === 'service' ? '#fff' : '#666', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>🔧 Service</button>
+        <button onClick={() => set('tipo', 'reparacion')} style={{ flex: 1, padding: '9px', borderRadius: 8, border: '1.5px solid ' + (f.tipo === 'reparacion' ? '#F59E0B' : '#ddd'), background: f.tipo === 'reparacion' ? '#F59E0B' : '#fff', color: f.tipo === 'reparacion' ? '#fff' : '#666', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>🛠️ Reparación</button>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Fecha"><input type="date" value={f.fecha} onChange={e => set('fecha', e.target.value)} style={inp} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Km"><input type="number" value={f.km} onChange={e => set('km', parseInt(e.target.value) || 0)} style={inp} /></Field></div>
+      </div>
+      <Field label="Descripción *"><input value={f.descripcion} onChange={e => set('descripcion', e.target.value)} placeholder="ej: Cambio de aceite y filtros" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Taller"><input value={f.taller} onChange={e => set('taller', e.target.value)} placeholder="opcional" style={inp} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Costo ($)"><input type="number" value={f.costo} onChange={e => set('costo', e.target.value)} placeholder="opcional" style={inp} /></Field></div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+        <button onClick={onCancel} style={{ ...btnSec, flex: 1 }}>Cancelar</button>
+        <button onClick={guardar} disabled={guardando} style={{ ...btnPri, flex: 1, opacity: guardando ? .6 : 1 }}>{guardando ? 'Guardando...' : 'Guardar'}</button>
+      </div>
+    </div>
+  );
+}
+
 
 // ========================= AUXILIARES =========================
 function SectionTitle({ icon: Icon, title, sub, accion }) {
