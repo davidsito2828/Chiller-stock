@@ -5,6 +5,9 @@ import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2
 
 const AZUL = '#0000DE';
 const AZUL_OSC = '#0000A8';
+const AZUL_PROF = '#070B34';   // azul noche profundo para sidebar
+const TINTA = '#0F172A';
+const CIELO = '#0EA5E9';
 const LOGO = '/logo-chillersystem.jpeg';
 
 const ROL_LABEL = {
@@ -36,11 +39,11 @@ export default function Home() {
   const rol = usuario.rol;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F4F6FB' }}>
+    <div style={{ minHeight: '100vh' }}>
       <Header usuario={usuario} onLogout={logout} />
-      <div style={{ display: 'flex', maxWidth: 1300, margin: '0 auto' }}>
+      <div style={{ display: 'flex', maxWidth: 1320, margin: '0 auto' }}>
         <Sidebar vista={vista} setVista={setVista} rol={rol} />
-        <main style={{ flex: 1, padding: '24px 28px', minHeight: 'calc(100vh - 64px)' }}>
+        <main style={{ flex: 1, padding: '30px 32px', minHeight: 'calc(100vh - 66px)' }}>
           {vista === 'dashboard' && <Dashboard />}
           {vista === 'stock' && <Stock rol={rol} usuario={usuario} />}
           {vista === 'refrigerantes' && <Refrigerantes rol={rol} usuario={usuario} />}
@@ -105,12 +108,14 @@ function Login({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: `linear-gradient(135deg, ${AZUL} 0%, ${AZUL_OSC} 100%)`, padding: 16 }}>
-      <div style={{ background: '#fff', borderRadius: 16, padding: '40px 36px', width: 410, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,40,.35)' }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <img src={LOGO} alt="Chiller System" style={{ width: 130, marginBottom: 8 }} />
-          <h2 style={{ margin: '8px 0 2px', color: AZUL, fontSize: 22 }}>Control de Stock</h2>
-          <p style={{ margin: 0, color: '#888', fontSize: 13 }}>Sistema interno · Acceso corporativo</p>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, position: 'relative', overflow: 'hidden', background: `linear-gradient(135deg, ${AZUL_PROF} 0%, #0A1048 55%, ${AZUL} 130%)` }}>
+      <div style={{ position: 'absolute', top: '-15%', left: '-10%', width: 500, height: 500, borderRadius: '50%', background: 'radial-gradient(circle, rgba(14,165,233,0.22), transparent 65%)', pointerEvents: 'none' }} />
+      <div style={{ position: 'absolute', bottom: '-20%', right: '-10%', width: 600, height: 600, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,0,222,0.3), transparent 65%)', pointerEvents: 'none' }} />
+      <div className="fadein" style={{ background: '#fff', borderRadius: 22, padding: '42px 38px', width: 420, maxWidth: '100%', boxShadow: '0 30px 90px rgba(7,11,52,0.5)', position: 'relative', zIndex: 2 }}>
+        <div style={{ textAlign: 'center', marginBottom: 26 }}>
+          <img src={LOGO} alt="Chiller System" style={{ width: 140, marginBottom: 10 }} />
+          <h2 style={{ margin: '8px 0 3px', color: TINTA, fontSize: 23, fontWeight: 800, letterSpacing: '-0.5px' }}>Control de Stock</h2>
+          <p style={{ margin: 0, color: '#94a3b8', fontSize: 13, fontWeight: 500 }}>Sistema interno · Acceso corporativo</p>
         </div>
         {paso === 'mail' && <>
           <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Correo de trabajo</label>
@@ -143,14 +148,21 @@ function Login({ onLogin }) {
 // ========================= HEADER =========================
 function Header({ usuario, onLogout }) {
   return (
-    <header style={{ background: '#fff', borderBottom: `3px solid ${AZUL}`, padding: '0 28px', height: 64, display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,.04)' }}>
-      <img src={LOGO} alt="Chiller System" style={{ height: 42 }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: '#222' }}>{usuario.nombre}</div>
-          <div style={{ fontSize: 11.5, color: AZUL, fontWeight: 600 }}>{ROL_LABEL[usuario.rol]}</div>
+    <header style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(15,23,42,0.08)', padding: '0 26px', height: 66, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 1px 0 rgba(255,255,255,0.6) inset, 0 4px 20px rgba(7,11,52,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+        <img src={LOGO} alt="Chiller System" style={{ height: 40 }} />
+        <div style={{ height: 26, width: 1, background: 'rgba(15,23,42,0.12)' }} />
+        <span style={{ fontFamily: "'Sora', sans-serif", fontSize: 13, fontWeight: 600, color: '#64748b', letterSpacing: '.5px' }}>Control de Stock</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,222,0.05)', padding: '6px 14px 6px 8px', borderRadius: 30 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: `linear-gradient(135deg, ${AZUL}, ${CIELO})`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14, fontFamily: "'Sora', sans-serif" }}>{(usuario.nombre || '?').charAt(0).toUpperCase()}</div>
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: TINTA, lineHeight: 1.1 }}>{usuario.nombre}</div>
+            <div style={{ fontSize: 10.5, color: AZUL, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.4px' }}>{ROL_LABEL[usuario.rol]}</div>
+          </div>
         </div>
-        <button onClick={onLogout} style={{ background: 'none', border: '1.5px solid #ddd', borderRadius: 8, padding: '7px 12px', fontSize: 13, cursor: 'pointer', color: '#666' }}>Salir</button>
+        <button onClick={onLogout} style={{ background: '#fff', border: '1.5px solid rgba(15,23,42,0.12)', borderRadius: 9, padding: '8px 14px', fontSize: 13, cursor: 'pointer', color: '#64748b', fontWeight: 600, transition: 'all .15s' }}>Salir</button>
       </div>
     </header>
   );
@@ -169,16 +181,19 @@ function Sidebar({ vista, setVista, rol }) {
     { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'dueno', 'deposito'] },
   ];
   return (
-    <aside style={{ width: 220, background: '#fff', borderRight: '1px solid #eee', padding: '20px 14px', minHeight: 'calc(100vh - 64px)' }}>
-      {items.filter(i => i.roles.includes(rol)).map(it => {
+    <aside style={{ width: 232, background: `linear-gradient(180deg, ${AZUL_PROF} 0%, #0A1048 100%)`, padding: '22px 16px', minHeight: 'calc(100vh - 66px)', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: 200, background: `radial-gradient(circle at 80% 0%, rgba(14,165,233,0.18), transparent 60%)`, pointerEvents: 'none' }} />
+      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', padding: '0 12px 12px', position: 'relative' }}>Menú</div>
+      {items.filter(i => i.roles.includes(rol)).map((it, idx) => {
         const Icon = it.icon; const active = vista === it.id;
         return (
-          <button key={it.id} onClick={() => setVista(it.id)}
-            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 11, padding: '11px 13px', marginBottom: 4, borderRadius: 9, border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 14.5, fontWeight: active ? 700 : 500, background: active ? AZUL : 'transparent', color: active ? '#fff' : '#444' }}>
-            <Icon size={18} /> <span style={{ flex: 1 }}>{it.label}</span>
-            {it.badge > 0 && <span style={{ background: active ? '#fff' : '#e53935', color: active ? AZUL : '#fff', borderRadius: 10, fontSize: 11, fontWeight: 700, padding: '1px 7px' }}>{it.badge}</span>}
+          <button key={it.id} onClick={() => setVista(it.id)} className="fadein"
+            style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', marginBottom: 5, borderRadius: 11, border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 14, fontFamily: "'Sora', sans-serif", fontWeight: active ? 600 : 500, background: active ? `linear-gradient(135deg, ${AZUL}, #2937FF)` : 'transparent', color: active ? '#fff' : 'rgba(255,255,255,0.6)', position: 'relative', boxShadow: active ? '0 8px 20px rgba(0,0,222,0.4)' : 'none', transition: 'all .18s', animationDelay: `${idx * 0.04}s` }}>
+            <Icon size={18} strokeWidth={active ? 2.4 : 2} /> <span style={{ flex: 1 }}>{it.label}</span>
+            {it.badge > 0 && <span style={{ background: active ? '#fff' : '#FF3B5C', color: active ? AZUL : '#fff', borderRadius: 10, fontSize: 11, fontWeight: 700, padding: '1px 7px' }}>{it.badge}</span>}
           </button>);
       })}
+      <div style={{ position: 'absolute', bottom: 18, left: 16, right: 16, fontSize: 10.5, color: 'rgba(255,255,255,0.3)', textAlign: 'center', fontFamily: "'Sora', sans-serif", letterSpacing: '.5px' }}>CHILLER SYSTEM · 2026</div>
     </aside>
   );
 }
@@ -214,20 +229,25 @@ function Dashboard() {
   if (!stats) return <Cargando />;
   const cards = [
     { label: 'Ítems en catálogo', value: stats.totalItems, icon: Package, color: AZUL },
-    { label: 'Unidades totales', value: stats.totalUnidades, icon: Boxes, color: '#00897b' },
-    { label: 'Stock bajo (≤2)', value: stats.bajos, icon: ArrowDownToLine, color: '#f57c00' },
-    { label: 'Pedidos pendientes', value: stats.pendientes, icon: Clock, color: '#e53935' },
+    { label: 'Unidades totales', value: stats.totalUnidades, icon: Boxes, color: '#0D9488' },
+    { label: 'Stock bajo (≤2)', value: stats.bajos, icon: ArrowDownToLine, color: '#F59E0B' },
+    { label: 'Pedidos pendientes', value: stats.pendientes, icon: Clock, color: '#F43F5E' },
   ];
   return (
     <div>
       <SectionTitle icon={LayoutDashboard} title="Panel principal" sub="Resumen general del depósito" />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, marginBottom: 26 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 16, marginBottom: 26 }}>
         {cards.map((c, i) => { const Icon = c.icon; return (
-          <div key={i} style={{ background: '#fff', borderRadius: 13, padding: 20, boxShadow: '0 2px 12px rgba(0,0,0,.05)', borderLeft: `4px solid ${c.color}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div><div style={{ fontSize: 30, fontWeight: 800, color: '#1a1a1a' }}>{c.value}</div><div style={{ fontSize: 13, color: '#888', marginTop: 2 }}>{c.label}</div></div>
-              <div style={{ background: c.color + '18', borderRadius: 10, padding: 9 }}><Icon size={22} color={c.color} /></div>
+          <div key={i} className="fadein" style={{ background: '#fff', borderRadius: 16, padding: '20px 22px', boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)', position: 'relative', overflow: 'hidden', animationDelay: `${i * 0.06}s` }}>
+            <div style={{ position: 'absolute', top: -20, right: -20, width: 90, height: 90, borderRadius: '50%', background: c.color + '0d' }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', position: 'relative' }}>
+              <div>
+                <div style={{ fontFamily: "'Sora', sans-serif", fontSize: 34, fontWeight: 800, color: TINTA, lineHeight: 1, letterSpacing: '-1px' }}>{typeof c.value === 'number' ? c.value.toLocaleString('es-AR') : c.value}</div>
+                <div style={{ fontSize: 12.5, color: '#94a3b8', marginTop: 7, fontWeight: 500 }}>{c.label}</div>
+              </div>
+              <div style={{ background: c.color + '15', borderRadius: 12, padding: 10, display: 'flex' }}><Icon size={22} color={c.color} strokeWidth={2.2} /></div>
             </div>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, height: 3, width: '100%', background: c.color, opacity: .85 }} />
           </div>); })}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 }}>
@@ -330,7 +350,7 @@ function Stock({ rol, usuario }) {
       {loading ? <Cargando /> : (
         <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 760 }}>
-            <thead><tr style={{ background: AZUL, color: '#fff', textAlign: 'left' }}>
+            <thead><tr style={{ background: `linear-gradient(135deg, ${AZUL}, #2937FF)`, color: '#fff', textAlign: 'left' }}>
               <th style={th}>Producto</th><th style={th}>Marca / Modelo</th><th style={th}>Rubro</th><th style={th}>Código</th><th style={th}>Depósito</th>
               <th style={{ ...th, textAlign: 'center' }}>Cant.</th><th style={{ ...th, textAlign: 'center', width: 150 }}>Acción</th>
             </tr></thead>
@@ -471,7 +491,7 @@ function Refrigerantes({ rol, usuario }) {
       {loading ? <Cargando /> : (
         <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 800 }}>
-            <thead><tr style={{ background: '#0288d1', color: '#fff', textAlign: 'left' }}>
+            <thead><tr style={{ background: 'linear-gradient(135deg, #0284C7, #0EA5E9)', color: '#fff', textAlign: 'left' }}>
               <th style={th}>Garrafa</th><th style={th}>Gas / Tipo</th><th style={th}>Estado</th><th style={th}>Supervisor</th><th style={th}>Destino</th><th style={th}>Salida</th><th style={th}>Días</th><th style={th}>Regreso</th>{esDeposito && <th style={{ ...th, textAlign: 'center', width: 180 }}>Acción</th>}
             </tr></thead>
             <tbody>
@@ -589,7 +609,7 @@ function Cobre({ rol, usuario }) {
       {loading ? <Cargando /> : <>
         <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)', marginBottom: 22 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 500 }}>
-            <thead><tr style={{ background: '#b8860b', color: '#fff', textAlign: 'left' }}>
+            <thead><tr style={{ background: 'linear-gradient(135deg, #B45309, #F59E0B)', color: '#fff', textAlign: 'left' }}>
               <th style={th}>Medida (pulg.)</th><th style={th}>Depósito</th><th style={{ ...th, textAlign: 'center' }}>Metros</th>{esDeposito && <th style={{ ...th, textAlign: 'center', width: 260 }}>Acciones</th>}
             </tr></thead>
             <tbody>
@@ -1001,31 +1021,34 @@ function FormReparacion({ vehiculo, usuario, onCancel, onGuardadoOk }) {
 // ========================= AUXILIARES =========================
 function SectionTitle({ icon: Icon, title, sub, accion }) {
   return (
-    <div style={{ marginBottom: 22, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
-      <div><h1 style={{ margin: 0, fontSize: 25, color: '#1a1a1a', display: 'flex', alignItems: 'center', gap: 10 }}><Icon size={26} color={AZUL} /> {title}</h1>{sub && <p style={{ margin: '4px 0 0', color: '#888', fontSize: 14 }}>{sub}</p>}</div>
+    <div className="fadein" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ width: 46, height: 46, borderRadius: 13, background: `linear-gradient(135deg, ${AZUL}, ${CIELO})`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px rgba(0,0,222,0.25)' }}><Icon size={24} color="#fff" strokeWidth={2.2} /></div>
+        <div><h1 style={{ margin: 0, fontSize: 25, color: TINTA, fontWeight: 800, letterSpacing: '-0.5px' }}>{title}</h1>{sub && <p style={{ margin: '3px 0 0', color: '#94a3b8', fontSize: 13.5, fontWeight: 500 }}>{sub}</p>}</div>
+      </div>
       {accion}
     </div>
   );
 }
 function BotonRefrescar({ onClick }) { return <button onClick={onClick} style={{ ...btnSec, padding: '8px 14px' }}><RefreshCw size={15} /> Actualizar</button>; }
-function Card({ title, children }) { return <div style={{ background: '#fff', borderRadius: 13, padding: 20, boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>{title && <h3 style={{ margin: '0 0 14px', fontSize: 16, color: '#333' }}>{title}</h3>}{children}</div>; }
-function Empty({ texto }) { return <div style={{ textAlign: 'center', padding: '30px 20px', color: '#aaa', fontSize: 14 }}><Package size={36} style={{ opacity: .3, marginBottom: 8 }} /><div>{texto}</div></div>; }
-function Cargando() { return <div style={{ textAlign: 'center', padding: 50, color: '#999' }}><RefreshCw size={28} style={{ animation: 'spin 1s linear infinite' }} /><div style={{ marginTop: 10, fontSize: 14 }}>Cargando...</div><style>{'@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}'}</style></div>; }
-function Select({ value, onChange, options }) { return <select value={value} onChange={e => onChange(e.target.value)} style={{ padding: '10px 14px', borderRadius: 9, border: '1.5px solid #ddd', fontSize: 14, background: '#fff', cursor: 'pointer', outline: 'none' }}>{options.map(o => <option key={o}>{o}</option>)}</select>; }
-function Field({ label, children }) { return <div style={{ marginBottom: 12 }}><label style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 5 }}>{label}</label>{children}</div>; }
-function Info({ icon: Icon, label, value }) { return <div style={{ background: '#F8F9FC', borderRadius: 8, padding: '8px 11px' }}><div style={{ fontSize: 11, color: '#999', display: 'flex', alignItems: 'center', gap: 4 }}><Icon size={12} /> {label}</div><div style={{ fontSize: 13.5, fontWeight: 600, color: '#333', marginTop: 2 }}>{value}</div></div>; }
-function EstadoBadge({ estado }) { const map = { pendiente: ['#fff3e0', '#e65100', 'Pendiente'], aprobado: ['#e8f5e9', '#2e7d32', 'Aprobado'], entregado: ['#e3f2fd', '#1565c0', 'Entregado'], rechazado: ['#ffebee', '#c62828', 'Rechazado'] }; const [bg, col, txt] = map[estado] || map.pendiente; return <span style={{ background: bg, color: col, fontSize: 12, fontWeight: 700, padding: '3px 11px', borderRadius: 20 }}>{txt}</span>; }
-function DepBadge({ dep }) { const col = dep === 'Caseros' ? AZUL : '#00897b'; return <span style={{ background: col + '15', color: col, fontSize: 11.5, fontWeight: 600, padding: '3px 9px', borderRadius: 6 }}>{dep}</span>; }
-function ModalShell({ children, onClose }) { return <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,30,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 16 }}><div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 15, padding: 28, width: 430, maxWidth: '100%', boxShadow: '0 20px 60px rgba(0,0,0,.3)' }}>{children}</div></div>; }
-function gasColor(g) { const m = { r410a: '#0288d1', r134a: '#7b1fa2', r22: '#e65100', r32: '#2e7d32' }; return m[(g || '').toLowerCase()] || '#0288d1'; }
+function Card({ title, children }) { return <div style={{ background: '#fff', borderRadius: 16, padding: 22, boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>{title && <h3 style={{ margin: '0 0 16px', fontSize: 15.5, color: TINTA, fontWeight: 700 }}>{title}</h3>}{children}</div>; }
+function Empty({ texto }) { return <div style={{ textAlign: 'center', padding: '36px 20px', color: '#cbd5e1', fontSize: 14 }}><div style={{ width: 56, height: 56, margin: '0 auto 12px', borderRadius: 16, background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Package size={28} color="#cbd5e1" /></div><div style={{ color: '#94a3b8' }}>{texto}</div></div>; }
+function Cargando() { return <div style={{ textAlign: 'center', padding: 50, color: '#94a3b8' }}><RefreshCw size={28} color={AZUL} style={{ animation: 'spin 1s linear infinite' }} /><div style={{ marginTop: 10, fontSize: 14 }}>Cargando...</div><style>{'@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}'}</style></div>; }
+function Select({ value, onChange, options }) { return <select value={value} onChange={e => onChange(e.target.value)} style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, background: '#fff', cursor: 'pointer', outline: 'none', color: TINTA, fontWeight: 500 }}>{options.map(o => <option key={o}>{o}</option>)}</select>; }
+function Field({ label, children }) { return <div style={{ marginBottom: 12 }}><label style={{ fontSize: 12.5, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 5 }}>{label}</label>{children}</div>; }
+function Info({ icon: Icon, label, value }) { return <div style={{ background: '#F8FAFC', borderRadius: 10, padding: '9px 12px', border: '1px solid #f1f5f9' }}><div style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500 }}><Icon size={12} /> {label}</div><div style={{ fontSize: 13.5, fontWeight: 700, color: TINTA, marginTop: 2 }}>{value}</div></div>; }
+function EstadoBadge({ estado }) { const map = { pendiente: ['#FEF3E2', '#D97706', 'Pendiente'], aprobado: ['#E7F8EF', '#059669', 'Aprobado'], entregado: ['#E6F3FE', '#0284C7', 'Entregado'], rechazado: ['#FEECEC', '#DC2626', 'Rechazado'] }; const [bg, col, txt] = map[estado] || map.pendiente; return <span style={{ background: bg, color: col, fontSize: 11.5, fontWeight: 700, padding: '4px 12px', borderRadius: 20 }}>{txt}</span>; }
+function DepBadge({ dep }) { const col = dep === 'Caseros' ? AZUL : '#0D9488'; return <span style={{ background: col + '12', color: col, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 7 }}>{dep}</span>; }
+function ModalShell({ children, onClose }) { return <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(7,11,52,0.55)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 16 }}><div onClick={e => e.stopPropagation()} className="fadein" style={{ background: '#fff', borderRadius: 18, padding: 28, width: 430, maxWidth: '100%', boxShadow: '0 30px 80px rgba(7,11,52,0.4)' }}>{children}</div></div>; }
+function gasColor(g) { const m = { r410a: '#0284C7', r134a: '#7C3AED', r22: '#EA580C', r32: '#059669' }; return m[(g || '').toLowerCase()] || '#0284C7'; }
 
-const th = { padding: '13px 16px', fontSize: 12.5, fontWeight: 700, letterSpacing: '.3px' };
-const td = { padding: '11px 16px', verticalAlign: 'middle' };
-const thb = { padding: '8px 10px', fontSize: 11.5, fontWeight: 700 };
-const tdb = { padding: '8px 10px', color: '#555' };
-const inp = { width: '100%', padding: '10px 12px', borderRadius: 8, border: '1.5px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none' };
-const btnPri = { display: 'flex', alignItems: 'center', gap: 7, padding: '11px 18px', background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 14.5, fontWeight: 700, cursor: 'pointer' };
-const btnSec = { display: 'flex', alignItems: 'center', gap: 7, padding: '11px 18px', background: '#fff', color: '#666', border: '1.5px solid #ddd', borderRadius: 9, fontSize: 14.5, fontWeight: 600, cursor: 'pointer' };
-const btnMini = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 11px', color: '#fff', border: 'none', borderRadius: 7, fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+const th = { padding: '14px 16px', fontSize: 11.5, fontWeight: 700, letterSpacing: '.5px', textTransform: 'uppercase' };
+const td = { padding: '12px 16px', verticalAlign: 'middle' };
+const thb = { padding: '8px 10px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.3px' };
+const tdb = { padding: '9px 10px', color: '#475569' };
+const inp = { width: '100%', padding: '10px 13px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, boxSizing: 'border-box', outline: 'none', color: TINTA };
+const btnPri = { display: 'flex', alignItems: 'center', gap: 7, padding: '11px 18px', background: AZUL, color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: "'Sora', sans-serif", cursor: 'pointer', boxShadow: '0 6px 16px rgba(0,0,222,0.25)' };
+const btnSec = { display: 'flex', alignItems: 'center', gap: 7, padding: '11px 18px', background: '#fff', color: '#475569', border: '1.5px solid #e2e8f0', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+const btnMini = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '6px 11px', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' };
 const qtyBtn = { width: 38, height: 38, borderRadius: 8, border: '1.5px solid #ddd', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const qtyBtnSm = { width: 28, height: 28, borderRadius: 7, border: '1.5px solid #ddd', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
