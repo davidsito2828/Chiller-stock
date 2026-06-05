@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar } from 'lucide-react';
+import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock } from 'lucide-react';
 
 const AZUL = '#0000DE';
 const AZUL_OSC = '#0000A8';
@@ -15,6 +15,21 @@ const ROL_LABEL = {
   dueno: 'Dueño',
   deposito: 'Depósito / Logística',
 };
+
+// Bases con inventario propio y accesos por mail.
+// Norberto (dueño) entra a todas. Para sumar/quitar gente, editá los arrays.
+const BASES = [
+  { id: 'ESMERALDA', label: 'Esmeralda', mails: ['ngarcia@chillersystem.com', 'david.cufre@chillersystem.com'] },
+  { id: 'PERON 500', label: 'Perón 500', mails: ['ngarcia@chillersystem.com', 'jcdelaiglesia@chillersystem.com'] },
+  { id: 'TORRE GALICIA', label: 'Torre Galicia', mails: ['ngarcia@chillersystem.com', 'claudiopaz@chillersystem.com'] },
+];
+const DUENO_MAIL = 'ngarcia@chillersystem.com';
+// Devuelve las bases a las que puede entrar un mail (el dueño entra a todas)
+function basesPermitidas(mail) {
+  const m = (mail || '').toLowerCase();
+  if (m === DUENO_MAIL) return BASES;
+  return BASES.filter(b => b.mails.map(x => x.toLowerCase()).includes(m));
+}
 
 export default function Home() {
   const [usuario, setUsuario] = useState(null);
@@ -42,7 +57,7 @@ export default function Home() {
     <div style={{ minHeight: '100vh' }}>
       <Header usuario={usuario} onLogout={logout} />
       <div style={{ display: 'flex', maxWidth: 1320, margin: '0 auto' }}>
-        <Sidebar vista={vista} setVista={setVista} rol={rol} />
+        <Sidebar vista={vista} setVista={setVista} rol={rol} usuario={usuario} />
         <main style={{ flex: 1, padding: '30px 32px', minHeight: 'calc(100vh - 66px)' }}>
           {vista === 'dashboard' && <Dashboard />}
           {vista === 'stock' && <Stock rol={rol} usuario={usuario} />}
@@ -51,6 +66,7 @@ export default function Home() {
           {vista === 'vehiculos' && <Vehiculos rol={rol} usuario={usuario} />}
           {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => setVista('pedidos')} />}
           {vista === 'pedidos' && <Pedidos rol={rol} usuario={usuario} />}
+          {vista.startsWith('base:') && <BaseInventario baseId={vista.slice(5)} usuario={usuario} />}
         </main>
       </div>
     </div>
@@ -169,7 +185,7 @@ function Header({ usuario, onLogout }) {
 }
 
 // ========================= SIDEBAR =========================
-function Sidebar({ vista, setVista, rol }) {
+function Sidebar({ vista, setVista, rol, usuario }) {
   const carrito = useCarrito();
   const items = [
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['supervisor', 'dueno', 'deposito'] },
@@ -180,6 +196,7 @@ function Sidebar({ vista, setVista, rol }) {
     { id: 'carrito', label: 'Mi Pedido', icon: ShoppingCart, roles: ['supervisor'], badge: carrito.length },
     { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'dueno', 'deposito'] },
   ];
+  const misBases = basesPermitidas(usuario.mail);
   return (
     <aside style={{ width: 232, background: `linear-gradient(180deg, ${AZUL_PROF} 0%, #0A1048 100%)`, padding: '22px 16px', minHeight: 'calc(100vh - 66px)', position: 'relative' }}>
       <div style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: 200, background: `radial-gradient(circle at 80% 0%, rgba(14,165,233,0.18), transparent 60%)`, pointerEvents: 'none' }} />
@@ -193,7 +210,18 @@ function Sidebar({ vista, setVista, rol }) {
             {it.badge > 0 && <span style={{ background: active ? '#fff' : '#FF3B5C', color: active ? AZUL : '#fff', borderRadius: 10, fontSize: 11, fontWeight: 700, padding: '1px 7px' }}>{it.badge}</span>}
           </button>);
       })}
-      <div style={{ position: 'absolute', bottom: 18, left: 16, right: 16, fontSize: 10.5, color: 'rgba(255,255,255,0.3)', textAlign: 'center', fontFamily: "'Sora', sans-serif", letterSpacing: '.5px' }}>CHILLER SYSTEM · 2026</div>
+      {misBases.length > 0 && <>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', padding: '16px 12px 10px', position: 'relative' }}>Bases / Inventarios</div>
+        {misBases.map(b => {
+          const id = 'base:' + b.id; const active = vista === id;
+          return (
+            <button key={id} onClick={() => setVista(id)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', marginBottom: 5, borderRadius: 11, border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 14, fontFamily: "'Sora', sans-serif", fontWeight: active ? 600 : 500, background: active ? `linear-gradient(135deg, ${CIELO}, #38BDF8)` : 'transparent', color: active ? '#fff' : 'rgba(255,255,255,0.6)', position: 'relative', boxShadow: active ? '0 8px 20px rgba(14,165,233,0.4)' : 'none', transition: 'all .18s' }}>
+              <MapPin size={18} strokeWidth={active ? 2.4 : 2} /> <span style={{ flex: 1 }}>{b.label}</span>
+            </button>);
+        })}
+      </>}
+      <div style={{ position: 'relative', marginTop: 24, fontSize: 10.5, color: 'rgba(255,255,255,0.3)', textAlign: 'center', fontFamily: "'Sora', sans-serif", letterSpacing: '.5px' }}>CHILLER SYSTEM · 2026</div>
     </aside>
   );
 }
@@ -291,6 +319,8 @@ function Stock({ rol, usuario }) {
   const [cat, setCat] = useState('Todas');
   const [modalEntrada, setModalEntrada] = useState(null);
   const [modalNuevo, setModalNuevo] = useState(false);
+  const [modalEditar, setModalEditar] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
   const carrito = useCarrito();
   const esDeposito = rol === 'deposito';
 
@@ -335,6 +365,18 @@ function Stock({ rol, usuario }) {
     cargar();
   };
 
+  const editarProducto = async (id, p) => {
+    await supabase.from('productos').update({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, deposito: p.deposito, cantidad: p.cantidad }).eq('id', id);
+    setModalEditar(null);
+    cargar();
+  };
+
+  const eliminarProducto = async (id) => {
+    await supabase.from('productos').delete().eq('id', id);
+    setConfirmDel(null);
+    cargar();
+  };
+
   return (
     <div>
       <SectionTitle icon={Boxes} title="Stock General" sub={`${stock.length} ítems · Caseros + Mataderos`} accion={esDeposito ? <button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar producto</button> : <BotonRefrescar onClick={cargar} />} />
@@ -365,7 +407,11 @@ function Stock({ rol, usuario }) {
                   <td style={{ ...td, textAlign: 'center' }}><span style={{ fontWeight: 700, color: s.cantidad === 0 ? '#e53935' : s.cantidad <= 2 ? '#f57c00' : '#222', fontSize: 15 }}>{s.cantidad}</span></td>
                   <td style={{ ...td, textAlign: 'center' }}>
                     {rol === 'supervisor' && <button onClick={() => agregarCarrito(s)} disabled={s.cantidad === 0} style={{ ...btnMini, background: s.cantidad === 0 ? '#ddd' : AZUL, cursor: s.cantidad === 0 ? 'not-allowed' : 'pointer' }}><Plus size={14} /> Pedir</button>}
-                    {rol === 'deposito' && <button onClick={() => setModalEntrada(s)} style={{ ...btnMini, background: '#00897b' }}><ArrowDownToLine size={14} /> Ingreso</button>}
+                    {rol === 'deposito' && <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
+                      <button onClick={() => setModalEntrada(s)} title="Ingreso de stock" style={{ ...btnMini, background: '#0D9488' }}><ArrowDownToLine size={14} /></button>
+                      <button onClick={() => setModalEditar(s)} title="Editar" style={{ ...btnMini, background: '#64748b' }}><Edit3 size={14} /></button>
+                      <button onClick={() => setConfirmDel(s)} title="Eliminar" style={{ ...btnMini, background: '#fff', color: '#DC2626', border: '1.5px solid #F7C1C1' }}><Trash2 size={14} /></button>
+                    </div>}
                     {rol === 'dueno' && <span style={{ color: '#bbb', fontSize: 12 }}>—</span>}
                   </td>
                 </tr>))}
@@ -376,6 +422,12 @@ function Stock({ rol, usuario }) {
       )}
       {modalEntrada && <ModalEntrada item={modalEntrada} onClose={() => setModalEntrada(null)} onConfirm={ingresar} />}
       {modalNuevo && <ModalNuevoProducto rubros={['Herramientas', 'Insumos', 'Materiales', 'Repuestos']} onClose={() => setModalNuevo(false)} onConfirm={crearProducto} />}
+      {modalEditar && <ModalNuevoProducto editar producto={modalEditar} rubros={['Herramientas', 'Insumos', 'Materiales', 'Repuestos']} onClose={() => setModalEditar(null)} onConfirm={(p) => editarProducto(modalEditar.id, p)} />}
+      {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
+        <h3 style={{ margin: '0 0 8px', color: '#DC2626' }}>Eliminar producto</h3>
+        <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>¿Seguro que querés eliminar <b>{confirmDel.nombre}</b> ({confirmDel.deposito})? Esta acción no se puede deshacer.</p>
+        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminarProducto(confirmDel.id)} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Eliminar</button></div>
+      </ModalShell>}
     </div>
   );
 }
@@ -384,24 +436,27 @@ function RubroBadge({ rubro }) {
   const col = colores[rubro] || '#64748b';
   return <span style={{ background: col + '18', color: col, fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 6 }}>{rubro || 'General'}</span>;
 }
-function ModalNuevoProducto({ rubros, onClose, onConfirm }) {
-  const [f, setF] = useState({ nombre: '', marca: '', modelo: '', codigo: '', descripcion: '', categoria: 'Insumos', deposito: 'Caseros', cantidad: 1 });
+function ModalNuevoProducto({ rubros, onClose, onConfirm, editar, producto }) {
+  const [f, setF] = useState(editar && producto
+    ? { nombre: producto.nombre || '', marca: producto.marca || '', modelo: producto.modelo || '', codigo: producto.codigo || '', descripcion: producto.descripcion || '', categoria: producto.categoria || 'Insumos', deposito: producto.deposito || 'Caseros', cantidad: producto.cantidad ?? 0 }
+    : { nombre: '', marca: '', modelo: '', codigo: '', descripcion: '', categoria: 'Insumos', deposito: 'Caseros', cantidad: 1 });
   const set = (k, v) => setF({ ...f, [k]: v });
   return (
     <ModalShell onClose={onClose}>
-      <h3 style={{ margin: '0 0 16px', color: AZUL }}>Agregar producto nuevo</h3>
+      <h3 style={{ margin: '0 0 16px', color: AZUL }}>{editar ? 'Editar producto' : 'Agregar producto nuevo'}</h3>
       <Field label="Nombre del producto *"><input value={f.nombre} onChange={e => set('nombre', e.target.value)} placeholder="ej: Manómetro digital" style={inp} /></Field>
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Marca"><input value={f.marca} onChange={e => set('marca', e.target.value)} style={inp} /></Field></div>
         <div style={{ flex: 1 }}><Field label="Modelo"><input value={f.modelo} onChange={e => set('modelo', e.target.value)} style={inp} /></Field></div>
       </div>
+      <Field label="Descripción"><input value={f.descripcion} onChange={e => set('descripcion', e.target.value)} placeholder="opcional" style={inp} /></Field>
       <Field label="Código"><input value={f.codigo} onChange={e => set('codigo', e.target.value)} placeholder="opcional" style={inp} /></Field>
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}><Field label="Rubro"><select value={f.categoria} onChange={e => set('categoria', e.target.value)} style={inp}>{rubros.map(r => <option key={r}>{r}</option>)}</select></Field></div>
         <div style={{ flex: 1 }}><Field label="Depósito"><select value={f.deposito} onChange={e => set('deposito', e.target.value)} style={inp}><option>Caseros</option><option>Mataderos</option></select></Field></div>
       </div>
       <Field label="Cantidad inicial"><input type="number" value={f.cantidad} onChange={e => set('cantidad', parseInt(e.target.value) || 0)} style={inp} /></Field>
-      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.nombre && onConfirm(f)} style={{ ...btnPri, flex: 1 }}>Agregar</button></div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.nombre && onConfirm(f)} style={{ ...btnPri, flex: 1 }}>{editar ? 'Guardar cambios' : 'Agregar'}</button></div>
     </ModalShell>
   );
 }
@@ -692,7 +747,7 @@ function ModalEditarMedida({ item, onClose, onConfirm }) {
 // ========================= CARRITO =========================
 function Carrito({ usuario, onIrPedidos }) {
   const carrito = useCarrito();
-  const [datos, setDatos] = useState({ presupuesto: '', obra: '', cliente: '' });
+  const [datos, setDatos] = useState({ razon_social: 'Chiller System SRL', presupuesto: '', obra: '', cliente: '' });
   const [guardando, setGuardando] = useState(false);
   const cambiarQty = (id, delta) => carritoStore.set(carrito.map(c => c.id === id ? { ...c, qty: Math.max(1, c.qty + delta) } : c));
   const quitar = (id) => carritoStore.set(carrito.filter(c => c.id !== id));
@@ -705,7 +760,7 @@ function Carrito({ usuario, onIrPedidos }) {
     const numero = String(nuevoNum).padStart(4, '0');
     const { data: pedido } = await supabase.from('pedidos').insert({
       numero, solicitante: usuario.nombre, mail: usuario.mail,
-      presupuesto: datos.presupuesto || null, obra: datos.obra || null, cliente: datos.cliente || null, estado: 'pendiente',
+      razon_social: datos.razon_social, presupuesto: datos.presupuesto || null, obra: datos.obra || null, cliente: datos.cliente || null, estado: 'pendiente',
     }).select().single();
     if (pedido) {
       await supabase.from('pedido_items').insert(carrito.map(c => ({ pedido_id: pedido.id, producto_id: c.id, nombre: c.n, marca: c.ma, deposito: c.dep, cantidad: c.qty })));
@@ -734,6 +789,7 @@ function Carrito({ usuario, onIrPedidos }) {
               </div>))}
           </Card>
           <Card title="Datos del pedido">
+            <Field label="Razón Social"><select value={datos.razon_social} onChange={e => setDatos({ ...datos, razon_social: e.target.value })} style={inp}><option>Chiller System SRL</option><option>Chiller Service S.A.</option></select></Field>
             <Field label="N° de Presupuesto"><input value={datos.presupuesto} onChange={e => setDatos({ ...datos, presupuesto: e.target.value })} placeholder="ej: PPTO-1234" style={inp} /></Field>
             <Field label="Obra"><input value={datos.obra} onChange={e => setDatos({ ...datos, obra: e.target.value })} placeholder="ej: Torre Maipú P20" style={inp} /></Field>
             <Field label="Cliente"><input value={datos.cliente} onChange={e => setDatos({ ...datos, cliente: e.target.value })} placeholder="ej: Banco Galicia" style={inp} /></Field>
@@ -759,8 +815,8 @@ function Pedidos({ rol, usuario }) {
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const aprobar = async (id) => { await supabase.from('pedidos').update({ estado: 'aprobado' }).eq('id', id); cargar(); };
-  const rechazar = async (id) => { await supabase.from('pedidos').update({ estado: 'rechazado' }).eq('id', id); cargar(); };
+  const aprobar = async (id) => { await supabase.from('pedidos').update({ estado: 'aprobado', aprobado_por: usuario.nombre }).eq('id', id); cargar(); };
+  const rechazar = async (id) => { await supabase.from('pedidos').update({ estado: 'rechazado', aprobado_por: usuario.nombre }).eq('id', id); cargar(); };
   const eliminar = async (id) => { await supabase.from('pedidos').delete().eq('id', id); setConfirmDel(null); cargar(); };
   const entregar = async (pedido) => {
     for (const it of pedido.pedido_items) {
@@ -796,18 +852,20 @@ function Pedidos({ rol, usuario }) {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14, fontSize: 13 }}>
               <Info icon={User} label="Solicitante" value={p.solicitante} />
+              <Info icon={Building2} label="Razón Social" value={p.razon_social || '—'} />
               <Info icon={FileText} label="Presupuesto" value={p.presupuesto || '—'} />
               <Info icon={Building2} label="Obra" value={p.obra || '—'} />
               <Info icon={User} label="Cliente" value={p.cliente || '—'} />
+              {p.aprobado_por && <Info icon={CheckCircle2} label={p.estado === 'rechazado' ? 'Rechazado por' : 'Aprobado por'} value={p.aprobado_por} />}
             </div>
             <div style={{ background: '#F8F9FC', borderRadius: 9, padding: '10px 14px', marginBottom: 14 }}>
               {(p.pedido_items || []).map((it, i) => (<div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}><span>{it.nombre} <span style={{ color: '#aaa' }}>· {it.deposito}</span></span><b>x{it.cantidad}</b></div>))}
             </div>
-            {rol === 'dueno' && p.estado === 'pendiente' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button onClick={() => aprobar(p.id)} style={{ ...btnPri, background: '#2e7d32' }}><CheckCircle2 size={16} /> Aprobar</button>
-              <button onClick={() => rechazar(p.id)} style={{ ...btnSec, color: '#c62828', borderColor: '#c62828' }}><XCircle size={16} /> Rechazar</button></div>}
-            {rol === 'deposito' && p.estado === 'aprobado' && <button onClick={() => entregar(p)} style={{ ...btnPri, background: '#00897b' }}><ArrowUpFromLine size={16} /> Marcar entregado (descuenta stock)</button>}
-            {rol === 'deposito' && p.estado === 'pendiente' && <div style={{ fontSize: 13, color: '#f57c00', fontWeight: 600 }}>⏳ Esperando aprobación del dueño para poder entregar</div>}
+            {(rol === 'dueno' || rol === 'supervisor') && p.estado === 'pendiente' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => aprobar(p.id)} style={{ ...btnPri, background: '#059669' }}><CheckCircle2 size={16} /> Aprobar</button>
+              <button onClick={() => rechazar(p.id)} style={{ ...btnSec, color: '#DC2626', borderColor: '#DC2626' }}><XCircle size={16} /> Rechazar</button></div>}
+            {rol === 'deposito' && p.estado === 'aprobado' && <button onClick={() => entregar(p)} style={{ ...btnPri, background: '#0D9488' }}><ArrowUpFromLine size={16} /> Marcar entregado (descuenta stock)</button>}
+            {rol === 'deposito' && p.estado === 'pendiente' && <div style={{ fontSize: 13, color: '#D97706', fontWeight: 600 }}>⏳ Esperando aprobación para poder entregar</div>}
           </div>))}
       {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
         <h3 style={{ margin: '0 0 8px', color: '#c62828' }}>Eliminar pedido #{confirmDel.numero}</h3>
@@ -1182,6 +1240,186 @@ function FormReparacion({ vehiculo, usuario, onCancel, onGuardadoOk }) {
         <button onClick={guardar} disabled={guardando} style={{ ...btnPri, flex: 1, opacity: guardando ? .6 : 1 }}>{guardando ? 'Guardando...' : 'Guardar'}</button>
       </div>
     </div>
+  );
+}
+
+
+
+// ========================= INVENTARIO DE BASES =========================
+function BaseInventario({ baseId, usuario }) {
+  const base = BASES.find(b => b.id === baseId);
+  const permitido = basesPermitidas(usuario.mail).some(b => b.id === baseId);
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busca, setBusca] = useState('');
+  const [cat, setCat] = useState('Todas');
+  const [modalNuevo, setModalNuevo] = useState(false);
+  const [modalEditar, setModalEditar] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [importando, setImportando] = useState(false);
+  const [msg, setMsg] = useState('');
+  const fileRef = React.useRef(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from('inventario_bases').select('*').eq('base', baseId).order('nombre');
+    setItems(data || []);
+    setLoading(false);
+  }, [baseId]);
+  useEffect(() => { if (permitido) cargar(); }, [cargar, permitido]);
+
+  const RUBROS = ['Herramientas', 'Insumos', 'Materiales', 'Repuestos'];
+  const categorias = useMemo(() => {
+    const enBase = Array.from(new Set(items.map(s => s.categoria).filter(Boolean)));
+    return ['Todas', ...Array.from(new Set([...RUBROS, ...enBase])).sort()];
+  }, [items]);
+
+  const filtrado = useMemo(() => {
+    const q = busca.toLowerCase();
+    return items.filter(s => (cat === 'Todas' || s.categoria === cat) &&
+      (q === '' || (s.nombre || '').toLowerCase().includes(q) || (s.marca || '').toLowerCase().includes(q) || (s.codigo || '').toLowerCase().includes(q) || (s.modelo || '').toLowerCase().includes(q) || (s.descripcion || '').toLowerCase().includes(q)));
+  }, [items, busca, cat]);
+
+  const crear = async (p) => { await supabase.from('inventario_bases').insert({ base: baseId, nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, cantidad: p.cantidad }); setModalNuevo(false); cargar(); };
+  const editar = async (id, p) => { await supabase.from('inventario_bases').update({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, cantidad: p.cantidad }).eq('id', id); setModalEditar(null); cargar(); };
+  const eliminar = async (id) => { await supabase.from('inventario_bases').delete().eq('id', id); setConfirmDel(null); cargar(); };
+
+  // Importar Excel: lee la primera hoja y mapea columnas por nombre
+  const importarExcel = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportando(true); setMsg('');
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (rows.length === 0) { setMsg('El Excel está vacío.'); setImportando(false); return; }
+      // Mapeo flexible de columnas (busca por nombre, sin importar mayúsculas)
+      const norm = (k) => String(k).toLowerCase().trim();
+      const pick = (row, ...alts) => {
+        for (const key of Object.keys(row)) {
+          if (alts.some(a => norm(key) === a || norm(key).includes(a))) return row[key];
+        }
+        return '';
+      };
+      const nuevos = rows.map(r => ({
+        base: baseId,
+        cantidad: parseInt(pick(r, 'cantidad', 'cant', 'stock')) || 0,
+        nombre: String(pick(r, 'nombre', 'producto', 'descripcion', 'detalle', 'articulo') || '').trim(),
+        marca: String(pick(r, 'marca') || '').trim(),
+        modelo: String(pick(r, 'modelo') || '').trim(),
+        descripcion: String(pick(r, 'descripcion', 'detalle', 'observacion') || '').trim(),
+        codigo: String(pick(r, 'codigo', 'cod', 'sku') || '').trim(),
+        categoria: String(pick(r, 'categoria', 'rubro') || 'General').trim() || 'General',
+      })).filter(x => x.nombre);
+      if (nuevos.length === 0) { setMsg('No se encontró la columna "nombre" o "producto" en el Excel.'); setImportando(false); return; }
+      // Insertar en lotes de 500
+      for (let i = 0; i < nuevos.length; i += 500) {
+        await supabase.from('inventario_bases').insert(nuevos.slice(i, i + 500));
+      }
+      setMsg(`✓ ${nuevos.length} ítems importados correctamente.`);
+      cargar();
+    } catch (err) {
+      setMsg('Error al leer el Excel: ' + err.message);
+    }
+    setImportando(false);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  if (!permitido) {
+    return (
+      <div>
+        <SectionTitle icon={Lock} title={base ? base.label : 'Base'} sub="Acceso restringido" />
+        <Card><div style={{ textAlign: 'center', padding: '30px 20px', color: '#94a3b8' }}><Lock size={36} color="#cbd5e1" style={{ marginBottom: 10 }} /><div>No tenés permiso para ver esta base.</div></div></Card>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <SectionTitle icon={MapPin} title={base.label} sub={`Inventario de la base · ${items.length} ítems`} accion={
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => fileRef.current?.click()} disabled={importando} style={{ ...btnSec, padding: '8px 14px', opacity: importando ? .6 : 1 }}><Upload size={15} /> {importando ? 'Importando...' : 'Importar Excel'}</button>
+          <button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar ítem</button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={importarExcel} style={{ display: 'none' }} />
+        </div>
+      } />
+
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#E7F8EF' : '#FEECEC', color: msg.startsWith('✓') ? '#059669' : '#DC2626', borderRadius: 10, padding: '11px 15px', marginBottom: 14, fontSize: 13.5, fontWeight: 600 }}>{msg}</div>}
+
+      <div style={{ background: '#E6F1FB', border: '1px solid #BBD9F5', borderRadius: 11, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#0C447C' }}>
+        <b>Importar Excel:</b> la primera hoja debe tener columnas como <i>nombre/producto, marca, modelo, código, cantidad, rubro</i>. Se agregan al inventario existente. Todo es editable y eliminable después.
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
+          <Search size={17} color="#999" style={{ position: 'absolute', left: 12, top: 11 }} />
+          <input value={busca} onChange={e => setBusca(e.target.value)} placeholder="Buscar en esta base..." style={{ width: '100%', padding: '10px 12px 10px 38px', borderRadius: 9, border: '1.5px solid #ddd', fontSize: 14, boxSizing: 'border-box', outline: 'none' }} />
+        </div>
+        <Select value={cat} onChange={setCat} options={categorias} />
+      </div>
+
+      {loading ? <Cargando /> : (
+        <div style={{ background: '#fff', borderRadius: 16, overflow: 'auto', boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 760 }}>
+            <thead><tr style={{ background: 'linear-gradient(135deg, #0284C7, #0EA5E9)', color: '#fff', textAlign: 'left' }}>
+              <th style={th}>Producto</th><th style={th}>Marca / Modelo</th><th style={th}>Rubro</th><th style={th}>Código</th><th style={{ ...th, textAlign: 'center' }}>Cant.</th><th style={{ ...th, textAlign: 'center', width: 110 }}>Acción</th>
+            </tr></thead>
+            <tbody>
+              {filtrado.map(s => (
+                <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={td}><b style={{ color: '#222' }}>{s.nombre}</b>{s.descripcion && <div style={{ fontSize: 11.5, color: '#999' }}>{s.descripcion}</div>}</td>
+                  <td style={td}>{s.marca}{s.modelo && <span style={{ color: '#999' }}> · {s.modelo}</span>}</td>
+                  <td style={td}><RubroBadge rubro={s.categoria} /></td>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 12, color: '#777' }}>{s.codigo || '—'}</td>
+                  <td style={{ ...td, textAlign: 'center' }}><span style={{ fontWeight: 700, color: s.cantidad === 0 ? '#e53935' : s.cantidad <= 2 ? '#f57c00' : '#222', fontSize: 15 }}>{s.cantidad}</span></td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
+                      <button onClick={() => setModalEditar(s)} title="Editar" style={{ ...btnMini, background: '#64748b' }}><Edit3 size={14} /></button>
+                      <button onClick={() => setConfirmDel(s)} title="Eliminar" style={{ ...btnMini, background: '#fff', color: '#DC2626', border: '1.5px solid #F7C1C1' }}><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>))}
+            </tbody>
+          </table>
+          {filtrado.length === 0 && <Empty texto={items.length === 0 ? 'Esta base no tiene ítems. Importá un Excel o agregá manualmente.' : 'No se encontraron ítems con ese filtro'} />}
+        </div>
+      )}
+
+      {modalNuevo && <ModalItemBase rubros={RUBROS} onClose={() => setModalNuevo(false)} onConfirm={crear} />}
+      {modalEditar && <ModalItemBase editar item={modalEditar} rubros={RUBROS} onClose={() => setModalEditar(null)} onConfirm={(p) => editar(modalEditar.id, p)} />}
+      {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
+        <h3 style={{ margin: '0 0 8px', color: '#DC2626' }}>Eliminar ítem</h3>
+        <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>¿Eliminar <b>{confirmDel.nombre}</b> de {base.label}? No se puede deshacer.</p>
+        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminar(confirmDel.id)} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Eliminar</button></div>
+      </ModalShell>}
+    </div>
+  );
+}
+
+function ModalItemBase({ rubros, onClose, onConfirm, editar, item }) {
+  const [f, setF] = useState(editar && item
+    ? { nombre: item.nombre || '', marca: item.marca || '', modelo: item.modelo || '', codigo: item.codigo || '', descripcion: item.descripcion || '', categoria: item.categoria || 'Insumos', cantidad: item.cantidad ?? 0 }
+    : { nombre: '', marca: '', modelo: '', codigo: '', descripcion: '', categoria: 'Insumos', cantidad: 1 });
+  const set = (k, v) => setF({ ...f, [k]: v });
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 16px', color: AZUL }}>{editar ? 'Editar ítem' : 'Agregar ítem'}</h3>
+      <Field label="Nombre del producto *"><input value={f.nombre} onChange={e => set('nombre', e.target.value)} style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Marca"><input value={f.marca} onChange={e => set('marca', e.target.value)} style={inp} /></Field></div>
+        <div style={{ flex: 1 }}><Field label="Modelo"><input value={f.modelo} onChange={e => set('modelo', e.target.value)} style={inp} /></Field></div>
+      </div>
+      <Field label="Descripción"><input value={f.descripcion} onChange={e => set('descripcion', e.target.value)} placeholder="opcional" style={inp} /></Field>
+      <Field label="Código"><input value={f.codigo} onChange={e => set('codigo', e.target.value)} placeholder="opcional" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Rubro"><select value={f.categoria} onChange={e => set('categoria', e.target.value)} style={inp}>{rubros.map(r => <option key={r}>{r}</option>)}</select></Field></div>
+        <div style={{ flex: 1 }}><Field label="Cantidad"><input type="number" value={f.cantidad} onChange={e => set('cantidad', parseInt(e.target.value) || 0)} style={inp} /></Field></div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.nombre && onConfirm(f)} style={{ ...btnPri, flex: 1 }}>{editar ? 'Guardar cambios' : 'Agregar'}</button></div>
+    </ModalShell>
   );
 }
 
