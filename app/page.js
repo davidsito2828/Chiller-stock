@@ -19,9 +19,9 @@ const ROL_LABEL = {
 // Bases con inventario propio y accesos por mail.
 // Norberto (dueño) entra a todas. Para sumar/quitar gente, editá los arrays.
 const BASES = [
-  { id: 'ESMERALDA', label: 'Esmeralda', mails: ['ngarcia@chillersystem.com', 'david.cufre@chillersystem.com'] },
-  { id: 'PERON 500', label: 'Perón 500', mails: ['ngarcia@chillersystem.com', 'jcdelaiglesia@chillersystem.com'] },
-  { id: 'TORRE GALICIA', label: 'Torre Galicia', mails: ['ngarcia@chillersystem.com', 'claudiopaz@chillersystem.com'] },
+  { id: 'ESMERALDA', label: 'Esmeralda', mails: ['ngarcia@chillersystem.com', 'david.cufre@chillersystem.com', 'obras@chillersystem.com'] },
+  { id: 'PERON 500', label: 'Perón 500', mails: ['ngarcia@chillersystem.com', 'jcdelaiglesia@chillersystem.com', 'operacionperon50@chillersystem.com'] },
+  { id: 'TORRE GALICIA', label: 'Torre Galicia', mails: ['ngarcia@chillersystem.com', 'claudiopaz@chillersystem.com', 'matias.e.centurion@chillersystem.com'] },
 ];
 const DUENO_MAIL = 'ngarcia@chillersystem.com';
 // Devuelve las bases a las que puede entrar un mail (el dueño entra a todas)
