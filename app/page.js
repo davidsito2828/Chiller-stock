@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock } from 'lucide-react';
+import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock, Menu } from 'lucide-react';
 
 const AZUL = '#0000DE';
 const AZUL_OSC = '#0000A8';
@@ -34,37 +34,51 @@ function basesPermitidas(mail) {
 export default function Home() {
   const [usuario, setUsuario] = useState(null);
   const [vista, setVista] = useState('dashboard');
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const esMovil = useEsMovil();
 
-  // Restaurar sesión guardada (solo el dato del usuario, no es login real)
+  // Restaurar sesión guardada (persiste aunque se cierre la app)
   useEffect(() => {
-    const guardado = typeof window !== 'undefined' ? window.sessionStorage.getItem('cs_user') : null;
-    if (guardado) setUsuario(JSON.parse(guardado));
+    if (typeof window === 'undefined') return;
+    const guardado = window.localStorage.getItem('cs_user');
+    if (guardado) { try { setUsuario(JSON.parse(guardado)); } catch {} }
   }, []);
 
   const login = (u) => {
     setUsuario(u);
-    window.sessionStorage.setItem('cs_user', JSON.stringify(u));
+    window.localStorage.setItem('cs_user', JSON.stringify(u));
+    window.localStorage.setItem('cs_last_mail', u.mail || '');
   };
   const logout = () => {
     setUsuario(null);
-    window.sessionStorage.removeItem('cs_user');
+    window.localStorage.removeItem('cs_user');
+    // El mail se conserva en 'cs_last_mail' para precargarlo en el próximo login
   };
 
   if (!usuario) return <Login onLogin={login} />;
   const rol = usuario.rol;
 
+  // al cambiar de vista en móvil, cerrar el menú
+  const irA = (v) => { setVista(v); setMenuAbierto(false); };
+
   return (
     <div style={{ minHeight: '100vh' }}>
-      <Header usuario={usuario} onLogout={logout} />
-      <div style={{ display: 'flex', maxWidth: 1320, margin: '0 auto' }}>
-        <Sidebar vista={vista} setVista={setVista} rol={rol} usuario={usuario} />
-        <main style={{ flex: 1, padding: '30px 32px', minHeight: 'calc(100vh - 66px)' }}>
+      <Header usuario={usuario} onLogout={logout} esMovil={esMovil} onToggleMenu={() => setMenuAbierto(o => !o)} />
+      <div style={{ display: 'flex', maxWidth: 1320, margin: '0 auto', position: 'relative' }}>
+        {/* Sidebar: fijo en desktop, deslizable en móvil */}
+        {esMovil && menuAbierto && <div onClick={() => setMenuAbierto(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(7,11,52,0.5)', zIndex: 60 }} />}
+        <div style={esMovil
+          ? { position: 'fixed', top: 0, left: 0, height: '100vh', zIndex: 70, transform: menuAbierto ? 'translateX(0)' : 'translateX(-100%)', transition: 'transform .25s ease', overflowY: 'auto' }
+          : {}}>
+          <Sidebar vista={vista} setVista={irA} rol={rol} usuario={usuario} />
+        </div>
+        <main style={{ flex: 1, padding: esMovil ? '18px 16px' : '30px 32px', minHeight: 'calc(100vh - 66px)', width: '100%', minWidth: 0 }}>
           {vista === 'dashboard' && <Dashboard />}
           {vista === 'stock' && <Stock rol={rol} usuario={usuario} />}
           {vista === 'refrigerantes' && <Refrigerantes rol={rol} usuario={usuario} />}
           {vista === 'cobre' && <Cobre rol={rol} usuario={usuario} />}
           {vista === 'vehiculos' && <Vehiculos rol={rol} usuario={usuario} />}
-          {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => setVista('pedidos')} />}
+          {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => irA('pedidos')} />}
           {vista === 'pedidos' && <Pedidos rol={rol} usuario={usuario} />}
           {vista.startsWith('base:') && <BaseInventario baseId={vista.slice(5)} usuario={usuario} />}
         </main>
@@ -92,9 +106,24 @@ function useCarrito() {
   return items;
 }
 
+// Detecta si la pantalla es de celular (menos de 820px de ancho)
+function useEsMovil() {
+  const [esMovil, setEsMovil] = useState(false);
+  useEffect(() => {
+    const check = () => setEsMovil(window.innerWidth < 820);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  return esMovil;
+}
+
 // ========================= LOGIN =========================
 function Login({ onLogin }) {
-  const [mail, setMail] = useState('');
+  const [mail, setMail] = useState(() => {
+    if (typeof window !== 'undefined') return window.localStorage.getItem('cs_last_mail') || '';
+    return '';
+  });
   const [error, setError] = useState('');
   const [paso, setPaso] = useState('mail');
   const [datosMail, setDatosMail] = useState(null);
@@ -162,23 +191,23 @@ function Login({ onLogin }) {
 }
 
 // ========================= HEADER =========================
-function Header({ usuario, onLogout }) {
+function Header({ usuario, onLogout, esMovil, onToggleMenu }) {
   return (
-    <header style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(15,23,42,0.08)', padding: '0 26px', height: 66, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 1px 0 rgba(255,255,255,0.6) inset, 0 4px 20px rgba(7,11,52,0.04)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
-        <img src={LOGO} alt="Chiller System" style={{ height: 40 }} />
-        <div style={{ height: 26, width: 1, background: 'rgba(15,23,42,0.12)' }} />
-        <span style={{ fontFamily: "'Sora', sans-serif", fontSize: 13, fontWeight: 600, color: '#64748b', letterSpacing: '.5px' }}>Control de Stock</span>
+    <header style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(15,23,42,0.08)', padding: esMovil ? '0 14px' : '0 26px', height: 66, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 1px 0 rgba(255,255,255,0.6) inset, 0 4px 20px rgba(7,11,52,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: esMovil ? 8 : 13 }}>
+        {esMovil && <button onClick={onToggleMenu} aria-label="Menú" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, display: 'flex', color: AZUL }}><Menu size={26} /></button>}
+        <img src={LOGO} alt="Chiller System" style={{ height: esMovil ? 32 : 40 }} />
+        {!esMovil && <><div style={{ height: 26, width: 1, background: 'rgba(15,23,42,0.12)' }} /><span style={{ fontFamily: "'Sora', sans-serif", fontSize: 13, fontWeight: 600, color: '#64748b', letterSpacing: '.5px' }}>Control de Stock</span></>}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,222,0.05)', padding: '6px 14px 6px 8px', borderRadius: 30 }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', background: `linear-gradient(135deg, ${AZUL}, ${CIELO})`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14, fontFamily: "'Sora', sans-serif" }}>{(usuario.nombre || '?').charAt(0).toUpperCase()}</div>
-          <div style={{ textAlign: 'left' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: esMovil ? 8 : 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(0,0,222,0.05)', padding: esMovil ? '5px 8px' : '6px 14px 6px 8px', borderRadius: 30 }}>
+          <div style={{ width: 32, height: 32, borderRadius: '50%', background: `linear-gradient(135deg, ${AZUL}, ${CIELO})`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 14, fontFamily: "'Sora', sans-serif", flexShrink: 0 }}>{(usuario.nombre || '?').charAt(0).toUpperCase()}</div>
+          {!esMovil && <div style={{ textAlign: 'left' }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: TINTA, lineHeight: 1.1 }}>{usuario.nombre}</div>
             <div style={{ fontSize: 10.5, color: AZUL, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.4px' }}>{ROL_LABEL[usuario.rol]}</div>
-          </div>
+          </div>}
         </div>
-        <button onClick={onLogout} style={{ background: '#fff', border: '1.5px solid rgba(15,23,42,0.12)', borderRadius: 9, padding: '8px 14px', fontSize: 13, cursor: 'pointer', color: '#64748b', fontWeight: 600, transition: 'all .15s' }}>Salir</button>
+        <button onClick={onLogout} style={{ background: '#fff', border: '1.5px solid rgba(15,23,42,0.12)', borderRadius: 9, padding: '8px 14px', fontSize: 13, cursor: 'pointer', color: '#64748b', fontWeight: 600 }}>Salir</button>
       </div>
     </header>
   );
