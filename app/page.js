@@ -1256,6 +1256,7 @@ function BaseInventario({ baseId, usuario }) {
   const [modalNuevo, setModalNuevo] = useState(false);
   const [modalEditar, setModalEditar] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [confirmVaciar, setConfirmVaciar] = useState(false);
   const [importando, setImportando] = useState(false);
   const [msg, setMsg] = useState('');
   const fileRef = React.useRef(null);
@@ -1283,6 +1284,7 @@ function BaseInventario({ baseId, usuario }) {
   const crear = async (p) => { await supabase.from('inventario_bases').insert({ base: baseId, nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, cantidad: p.cantidad }); setModalNuevo(false); cargar(); };
   const editar = async (id, p) => { await supabase.from('inventario_bases').update({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, cantidad: p.cantidad }).eq('id', id); setModalEditar(null); cargar(); };
   const eliminar = async (id) => { await supabase.from('inventario_bases').delete().eq('id', id); setConfirmDel(null); cargar(); };
+  const vaciarBase = async () => { await supabase.from('inventario_bases').delete().eq('base', baseId); setConfirmVaciar(false); setMsg('✓ Base vaciada. Ya podés subir el Excel correcto.'); cargar(); };
 
   // Importar Excel: lee la primera hoja y mapea columnas por nombre
   const importarExcel = async (e) => {
@@ -1340,7 +1342,8 @@ function BaseInventario({ baseId, usuario }) {
   return (
     <div>
       <SectionTitle icon={MapPin} title={base.label} sub={`Inventario de la base · ${items.length} ítems`} accion={
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {items.length > 0 && <button onClick={() => setConfirmVaciar(true)} style={{ ...btnSec, padding: '8px 14px', color: '#DC2626', borderColor: '#F7C1C1' }}><Trash2 size={15} /> Vaciar base</button>}
           <button onClick={() => fileRef.current?.click()} disabled={importando} style={{ ...btnSec, padding: '8px 14px', opacity: importando ? .6 : 1 }}><Upload size={15} /> {importando ? 'Importando...' : 'Importar Excel'}</button>
           <button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar ítem</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={importarExcel} style={{ display: 'none' }} />
@@ -1394,6 +1397,12 @@ function BaseInventario({ baseId, usuario }) {
         <h3 style={{ margin: '0 0 8px', color: '#DC2626' }}>Eliminar ítem</h3>
         <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>¿Eliminar <b>{confirmDel.nombre}</b> de {base.label}? No se puede deshacer.</p>
         <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminar(confirmDel.id)} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Eliminar</button></div>
+      </ModalShell>}
+      {confirmVaciar && <ModalShell onClose={() => setConfirmVaciar(false)}>
+        <h3 style={{ margin: '0 0 8px', color: '#DC2626', display: 'flex', alignItems: 'center', gap: 8 }}><AlertTriangle size={20} /> Vaciar {base.label}</h3>
+        <p style={{ fontSize: 14, color: '#475569', margin: '0 0 12px' }}>Vas a borrar <b>los {items.length} ítems</b> del inventario de esta base. Esto sirve para cuando subiste un Excel equivocado y querés volver a empezar.</p>
+        <div style={{ background: '#FEECEC', borderRadius: 9, padding: '11px 14px', fontSize: 13, color: '#DC2626', marginBottom: 18, fontWeight: 600 }}>Esta acción NO se puede deshacer. Solo afecta a {base.label}, no toca las otras bases.</div>
+        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmVaciar(false)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={vaciarBase} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Sí, vaciar todo</button></div>
       </ModalShell>}
     </div>
   );
