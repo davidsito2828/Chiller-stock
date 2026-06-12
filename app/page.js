@@ -1125,6 +1125,7 @@ function ModalHistorialVehiculo({ vehiculo, puedeEditar, usuario, onClose, onAct
   const [novedades, setNovedades] = useState([]);
   const [loading, setLoading] = useState(true);
   const [agregando, setAgregando] = useState(false);
+  const [editandoUso, setEditandoUso] = useState(null);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -1139,6 +1140,19 @@ function ModalHistorialVehiculo({ vehiculo, puedeEditar, usuario, onClose, onAct
     setLoading(false);
   }, [vehiculo.id]);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // ¿puede editar este uso? solo quien lo registró o el dueño
+  const puedeEditarUso = (u) => usuario.rol === 'dueno' || u.usuario === usuario.nombre;
+
+  const guardarEdicionUso = async (id, datos) => {
+    await supabase.from('usos_vehiculo').update({ km_inicio: datos.km_inicio, km_fin: datos.km_fin, nota: datos.nota || null }).eq('id', id);
+    // recalcular el km del vehículo: el mayor km_fin registrado entre todos los usos cerrados
+    const { data: todos } = await supabase.from('usos_vehiculo').select('km_fin').eq('vehiculo_id', vehiculo.id).eq('estado', 'cerrado');
+    const maxFin = Math.max(0, ...(todos || []).map(x => x.km_fin || 0), datos.km_fin || 0);
+    await supabase.from('vehiculos').update({ km_actual: maxFin }).eq('id', vehiculo.id);
+    setEditandoUso(null);
+    cargar(); onActualizar();
+  };
 
   const resolverNovedad = async (id) => {
     await supabase.from('novedades_vehiculo').update({ estado: 'resuelto', resuelto_por: usuario.nombre, resuelto_en: new Date().toISOString() }).eq('id', id);
@@ -1175,15 +1189,22 @@ function ModalHistorialVehiculo({ vehiculo, puedeEditar, usuario, onClose, onAct
           {tab === 'uso' && (usos.length === 0 ? <Empty texto="Sin registros de uso todavía" /> : (
             <div>{usos.map(u => (
               <div key={u.id} style={{ borderLeft: `3px solid ${u.estado === 'en_uso' ? '#D97706' : AZUL}`, background: '#F8FAFC', borderRadius: 10, padding: '11px 14px', marginBottom: 9 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
-                  <span style={{ fontWeight: 700, fontSize: 13.5, color: TINTA }}><User size={12} style={{ verticalAlign: -1 }} /> {u.usuario}</span>
-                  {u.estado === 'en_uso' ? <span style={{ background: '#FEF3E2', color: '#D97706', fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 10 }}>En uso</span> : <span style={{ background: '#E7F8EF', color: '#059669', fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 10 }}>Cerrado</span>}
-                </div>
-                <div style={{ fontSize: 12.5, color: '#475569' }}>
-                  Tomó: {fmtH(u.tomado_en)} · {(u.km_inicio || 0).toLocaleString('es-AR')} km
-                  {u.estado === 'cerrado' && <><br />Devolvió: {fmtH(u.devuelto_en)} · {(u.km_fin || 0).toLocaleString('es-AR')} km · <b>recorrió {Math.max(0, (u.km_fin || 0) - (u.km_inicio || 0)).toLocaleString('es-AR')} km</b></>}
-                </div>
-                {u.nota && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3, fontStyle: 'italic' }}>{u.nota}</div>}
+                {editandoUso === u.id
+                  ? <FormEditarUso uso={u} onCancel={() => setEditandoUso(null)} onGuardar={(d) => guardarEdicionUso(u.id, d)} />
+                  : <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
+                      <span style={{ fontWeight: 700, fontSize: 13.5, color: TINTA }}><User size={12} style={{ verticalAlign: -1 }} /> {u.usuario}</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        {u.estado === 'en_uso' ? <span style={{ background: '#FEF3E2', color: '#D97706', fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 10 }}>En uso</span> : <span style={{ background: '#E7F8EF', color: '#059669', fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 10 }}>Cerrado</span>}
+                        {puedeEditarUso(u) && <button onClick={() => setEditandoUso(u.id)} title="Corregir" style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 2, display: 'flex' }}><Edit3 size={15} /></button>}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12.5, color: '#475569' }}>
+                      Tomó: {fmtH(u.tomado_en)} · {(u.km_inicio || 0).toLocaleString('es-AR')} km
+                      {u.estado === 'cerrado' && <><br />Devolvió: {fmtH(u.devuelto_en)} · {(u.km_fin || 0).toLocaleString('es-AR')} km · <b>recorrió {Math.max(0, (u.km_fin || 0) - (u.km_inicio || 0)).toLocaleString('es-AR')} km</b></>}
+                    </div>
+                    {u.nota && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3, fontStyle: 'italic' }}>{u.nota}</div>}
+                  </>}
               </div>
             ))}</div>
           ))}
@@ -1227,6 +1248,29 @@ function ModalHistorialVehiculo({ vehiculo, puedeEditar, usuario, onClose, onAct
             )}
           </>}
         </>}
+      </div>
+    </div>
+  );
+}
+
+function FormEditarUso({ uso, onCancel, onGuardar }) {
+  const [kmInicio, setKmInicio] = useState(uso.km_inicio || 0);
+  const [kmFin, setKmFin] = useState(uso.km_fin || 0);
+  const [nota, setNota] = useState(uso.nota || '');
+  const cerrado = uso.estado === 'cerrado';
+  const recorrido = Math.max(0, kmFin - kmInicio);
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: AZUL, marginBottom: 10 }}>Corregir registro de {uso.usuario}</div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><Field label="Km al tomar"><input type="number" value={kmInicio} onChange={e => setKmInicio(parseInt(e.target.value) || 0)} style={inp} /></Field></div>
+        {cerrado && <div style={{ flex: 1 }}><Field label="Km al devolver"><input type="number" value={kmFin} onChange={e => setKmFin(parseInt(e.target.value) || 0)} style={inp} /></Field></div>}
+      </div>
+      {cerrado && <div style={{ background: '#E7F8EF', borderRadius: 8, padding: '8px 12px', fontSize: 12.5, color: '#059669', margin: '0 0 12px' }}>Recorrido corregido: <b>{recorrido.toLocaleString('es-AR')} km</b></div>}
+      <Field label="Nota"><input value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+        <button onClick={onCancel} style={{ ...btnSec, flex: 1, padding: '9px' }}>Cancelar</button>
+        <button onClick={() => onGuardar({ km_inicio: kmInicio, km_fin: cerrado ? kmFin : null, nota })} style={{ ...btnPri, flex: 1, padding: '9px' }}>Guardar corrección</button>
       </div>
     </div>
   );
