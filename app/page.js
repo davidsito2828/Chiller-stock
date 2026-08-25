@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock, Menu } from 'lucide-react';
+import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock, Menu, Users, KeyRound } from 'lucide-react';
 
 const AZUL = '#0000DE';
 const AZUL_OSC = '#0000A8';
@@ -11,10 +11,17 @@ const CIELO = '#0EA5E9';
 const LOGO = '/logo-chillersystem.jpeg';
 
 const ROL_LABEL = {
-  supervisor: 'Supervisor / Técnico',
-  dueno: 'Dueño',
+  dueno: 'Gerente',
+  supervisor: 'Supervisor',
+  tecnico: 'Técnico',
   deposito: 'Depósito / Logística',
 };
+// Roles que una persona nueva puede elegirse sola. "Gerente" queda reservado.
+const ROLES_AUTOREGISTRO = [
+  ['supervisor', 'Supervisor', 'Coordina técnicos, aprueba pedidos y consulta stock'],
+  ['tecnico', 'Técnico', 'Trabajo de campo: consulta stock y solicita pedidos'],
+  ['deposito', 'Depósito / Logística', 'Carga stock, entrega y mueve refrigerantes/cañería'],
+];
 
 // Bases con inventario propio y accesos por mail.
 // Norberto (dueño) entra a todas. Para sumar/quitar gente, editá los arrays.
@@ -24,10 +31,16 @@ const BASES = [
   { id: 'TORRE GALICIA', label: 'Torre Galicia', mails: ['ngarcia@chillersystem.com', 'claudiopaz@chillersystem.com', 'matias.e.centurion@chillersystem.com'] },
 ];
 const DUENO_MAIL = 'ngarcia@chillersystem.com';
-// Devuelve las bases a las que puede entrar un mail (el dueño entra a todas)
+// Mails con acceso total a la app, sin importar el rol que tengan asignado.
+// David hace tareas de gerencia aunque su rol visible sea "Supervisor".
+const ADMIN_MAILS = [DUENO_MAIL, 'david.cufre@chillersystem.com'];
+function accesoTotal(usuario) {
+  return ADMIN_MAILS.includes((usuario?.mail || '').toLowerCase());
+}
+// Devuelve las bases a las que puede entrar un mail (accesoTotal entra a todas)
 function basesPermitidas(mail) {
   const m = (mail || '').toLowerCase();
-  if (m === DUENO_MAIL) return BASES;
+  if (ADMIN_MAILS.includes(m)) return BASES;
   return BASES.filter(b => b.mails.map(x => x.toLowerCase()).includes(m));
 }
 
@@ -75,7 +88,8 @@ export default function Home() {
         <main style={{ flex: 1, padding: esMovil ? '18px 16px' : '30px 32px', minHeight: 'calc(100vh - 66px)', width: '100%', minWidth: 0 }}>
           {vista === 'dashboard' && <Dashboard />}
           {vista === 'stock' && <Stock rol={rol} usuario={usuario} />}
-          {vista === 'refrigerantes' && <Refrigerantes rol={rol} usuario={usuario} />}
+          {vista === 'refrigerantes' && (rol === 'tecnico' ? <AccesoDenegado titulo="Refrigerantes" mensaje="Este módulo es solo para Gerente, Depósito y Supervisores." /> : <Refrigerantes rol={rol} usuario={usuario} />)}
+          {vista === 'usuarios' && (accesoTotal(usuario) ? <GestionUsuarios usuario={usuario} /> : <AccesoDenegado titulo="Usuarios" mensaje="Solo el gerente puede administrar usuarios." />)}
           {vista === 'cobre' && <Cobre rol={rol} usuario={usuario} />}
           {vista === 'vehiculos' && <Vehiculos rol={rol} usuario={usuario} />}
           {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => irA('pedidos')} />}
@@ -124,33 +138,68 @@ function Login({ onLogin }) {
     if (typeof window !== 'undefined') return window.localStorage.getItem('cs_last_mail') || '';
     return '';
   });
+  const [password, setPassword] = useState('');
+  const [password2, setPassword2] = useState('');
   const [error, setError] = useState('');
-  const [paso, setPaso] = useState('mail');
-  const [datosMail, setDatosMail] = useState(null);
+  const [paso, setPaso] = useState('mail'); // mail -> password | crear_pass | nuevo
+  const [datos, setDatos] = useState(null); // { mail, nombre, rol, tienePassword, existe }
   const [cargando, setCargando] = useState(false);
 
-  const validar = async () => {
+  const validarMail = async () => {
     const m = mail.trim().toLowerCase();
     if (!m.endsWith('@chillersystem.com')) {
       setError('El acceso es solo con tu correo corporativo @chillersystem.com');
       return;
     }
     setCargando(true);
-    const { data: existente } = await supabase.from('usuarios').select('*').eq('mail', m).maybeSingle();
+    const { data, error: err } = await supabase.rpc('login_usuario', { p_mail: m });
     setCargando(false);
-    if (existente) {
-      onLogin({ mail: existente.mail, nombre: existente.nombre, rol: existente.rol });
+    if (err) { setError('No se pudo verificar el correo. Probá de nuevo.'); return; }
+    const r = data?.[0];
+    if (!r || !r.existe) {
+      const nombreSugerido = m.split('@')[0].replace(/\./g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      setDatos({ mail: m, nombre: nombreSugerido, rol: null, existe: false });
+      setPaso('nuevo');
       return;
     }
-    const nombre = m.split('@')[0].replace(/\./g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    setDatosMail({ mail: m, nombre });
-    setPaso('rol');
+    if (!r.tiene_password) {
+      setDatos({ mail: m, nombre: r.nombre, rol: r.rol, existe: true, tienePassword: false });
+      setPaso('crear_pass');
+      return;
+    }
+    setDatos({ mail: m, nombre: r.nombre, rol: r.rol, existe: true, tienePassword: true });
+    setPaso('password');
   };
 
-  const elegirRol = async (rol) => {
-    await supabase.from('usuarios').insert({ mail: datosMail.mail, nombre: datosMail.nombre, rol });
-    onLogin({ ...datosMail, rol });
+  const validarPassword = async () => {
+    if (!password) { setError('Ingresá tu contraseña'); return; }
+    setCargando(true);
+    const { data, error: err } = await supabase.rpc('login_usuario', { p_mail: datos.mail, p_password: password });
+    setCargando(false);
+    if (err) { setError('Error de conexión, probá de nuevo.'); return; }
+    const r = data?.[0];
+    if (!r?.password_ok) { setError('Contraseña incorrecta.'); return; }
+    onLogin({ mail: datos.mail, nombre: r.nombre, rol: r.rol });
   };
+
+  // Crea la contraseña por primera vez: sirve tanto para cuentas viejas (migración)
+  // como para el alta de una cuenta nueva con rol elegido.
+  const crearPassword = async (rolElegido) => {
+    if (password.length < 4) { setError('La contraseña debe tener al menos 4 caracteres.'); return; }
+    if (password !== password2) { setError('Las contraseñas no coinciden.'); return; }
+    setCargando(true);
+    const { data, error: err } = await supabase.rpc('set_password_usuario', {
+      p_mail: datos.mail, p_password: password,
+      p_nombre: datos.existe ? null : datos.nombre,
+      p_rol: datos.existe ? null : rolElegido,
+    });
+    setCargando(false);
+    if (err) { setError('No se pudo guardar. Probá de nuevo.'); return; }
+    const r = data?.[0];
+    onLogin({ mail: datos.mail, nombre: r.nombre, rol: r.rol });
+  };
+
+  const volver = () => { setPaso('mail'); setPassword(''); setPassword2(''); setError(''); };
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, position: 'relative', overflow: 'hidden', background: `linear-gradient(135deg, ${AZUL_PROF} 0%, #0A1048 55%, ${AZUL} 130%)` }}>
@@ -162,28 +211,70 @@ function Login({ onLogin }) {
           <h2 style={{ margin: '8px 0 3px', color: TINTA, fontSize: 23, fontWeight: 800, letterSpacing: '-0.5px' }}>Control de Stock</h2>
           <p style={{ margin: 0, color: '#94a3b8', fontSize: 13, fontWeight: 500 }}>Sistema interno · Acceso corporativo</p>
         </div>
+
         {paso === 'mail' && <>
           <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Correo de trabajo</label>
-          <input value={mail} onChange={e => { setMail(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && validar()}
+          <input value={mail} onChange={e => { setMail(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && validarMail()}
             placeholder="nombre@chillersystem.com" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 4, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
           {error && <p style={{ color: '#d32f2f', fontSize: 12.5, margin: '4px 0' }}>{error}</p>}
-          <button onClick={validar} disabled={cargando} style={{ width: '100%', marginTop: 14, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: cargando ? .6 : 1 }}>
+          <button onClick={validarMail} disabled={cargando} style={{ width: '100%', marginTop: 14, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: cargando ? .6 : 1 }}>
             <LogIn size={18} /> {cargando ? 'Verificando...' : 'Continuar'}
           </button>
-          <p style={{ marginTop: 18, fontSize: 12, color: '#999', textAlign: 'center' }}>Cualquier correo <b>@chillersystem.com</b> tiene acceso.</p>
+          <p style={{ marginTop: 18, fontSize: 12, color: '#999', textAlign: 'center' }}>Acceso solo con correo <b>@chillersystem.com</b> y contraseña personal.</p>
         </>}
-        {paso === 'rol' && <>
-          <p style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 4 }}>Hola <b>{datosMail.nombre}</b></p>
-          <p style={{ fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 16 }}>¿Con qué rol vas a trabajar?<br /><span style={{ fontSize: 11.5, color: '#aaa' }}>Se elige una sola vez.</span></p>
-          {[['supervisor', 'Supervisor / Técnico', 'Consulta stock y solicita pedidos'],
-            ['deposito', 'Depósito / Logística', 'Carga stock, entrega y mueve refrigerantes/cañería']].map(([r, t, d]) => (
-            <button key={r} onClick={() => elegirRol(r)}
-              style={{ width: '100%', textAlign: 'left', padding: '13px 15px', marginBottom: 9, borderRadius: 10, border: '1.5px solid #e0e0e0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 11 }}>
+
+        {paso === 'password' && <>
+          <p style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 4 }}>Hola de nuevo, <b>{datos.nombre}</b></p>
+          <p style={{ fontSize: 12.5, color: '#94a3b8', textAlign: 'center', marginBottom: 16 }}>{ROL_LABEL[datos.rol]}</p>
+          <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Contraseña</label>
+          <input type="password" value={password} onChange={e => { setPassword(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && validarPassword()} autoFocus
+            placeholder="••••••" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 4, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
+          {error && <p style={{ color: '#d32f2f', fontSize: 12.5, margin: '4px 0' }}>{error}</p>}
+          <button onClick={validarPassword} disabled={cargando} style={{ width: '100%', marginTop: 14, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: cargando ? .6 : 1 }}>
+            <LogIn size={18} /> {cargando ? 'Ingresando...' : 'Ingresar'}
+          </button>
+          <button onClick={volver} style={{ width: '100%', marginTop: 10, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
+        </>}
+
+        {paso === 'crear_pass' && <>
+          <p style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 4 }}>Hola <b>{datos.nombre}</b></p>
+          <div style={{ background: '#E6F1FB', border: '1px solid #BBD9F5', borderRadius: 9, padding: '10px 12px', margin: '0 0 16px', fontSize: 12.5, color: '#0C447C', textAlign: 'center' }}>Tu cuenta todavía no tiene contraseña. Creá una ahora para seguir usando la app.</div>
+          <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Nueva contraseña</label>
+          <input type="password" value={password} onChange={e => { setPassword(e.target.value); setError(''); }} autoFocus
+            placeholder="mínimo 4 caracteres" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 10, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
+          <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Repetir contraseña</label>
+          <input type="password" value={password2} onChange={e => { setPassword2(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && crearPassword()}
+            placeholder="repetir" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 4, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
+          {error && <p style={{ color: '#d32f2f', fontSize: 12.5, margin: '4px 0' }}>{error}</p>}
+          <button onClick={() => crearPassword()} disabled={cargando} style={{ width: '100%', marginTop: 14, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: cargando ? .6 : 1 }}>
+            <LogIn size={18} /> {cargando ? 'Guardando...' : 'Crear contraseña e ingresar'}
+          </button>
+          <button onClick={volver} style={{ width: '100%', marginTop: 10, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
+        </>}
+
+        {paso === 'nuevo' && <>
+          <p style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 4 }}>Hola <b>{datos.nombre}</b>, sos nuevo por acá</p>
+          <p style={{ fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 14 }}>Elegí tu rol y creá tu contraseña.<br /><span style={{ fontSize: 11.5, color: '#aaa' }}>El rol se elige una sola vez.</span></p>
+          {ROLES_AUTOREGISTRO.map(([r, t, d]) => (
+            <button key={r} onClick={() => setDatos({ ...datos, rolElegido: r })}
+              style={{ width: '100%', textAlign: 'left', padding: '12px 15px', marginBottom: 8, borderRadius: 10, border: '1.5px solid ' + (datos.rolElegido === r ? AZUL : '#e0e0e0'), background: datos.rolElegido === r ? '#EEF2FF' : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 11 }}>
               <ArrowRight size={16} color={AZUL} />
-              <div><div style={{ fontWeight: 700, fontSize: 14.5, color: '#222' }}>{t}</div><div style={{ fontSize: 12, color: '#999' }}>{d}</div></div>
+              <div><div style={{ fontWeight: 700, fontSize: 14, color: '#222' }}>{t}</div><div style={{ fontSize: 11.5, color: '#999' }}>{d}</div></div>
             </button>))}
-          <div style={{ background: '#FFF8E1', border: '1px solid #ffe082', borderRadius: 9, padding: '10px 12px', margin: '4px 0 10px', fontSize: 11.5, color: '#7c5800' }}>El rol de <b>Gerencia/Dueño</b> está reservado y no puede autoasignarse. Si necesitás otro rol, avisá a David.</div>
-          <button onClick={() => setPaso('mail')} style={{ width: '100%', marginTop: 4, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
+          <div style={{ background: '#FFF8E1', border: '1px solid #ffe082', borderRadius: 9, padding: '9px 12px', margin: '2px 0 14px', fontSize: 11.5, color: '#7c5800' }}>El rol de <b>Gerente</b> está reservado y no puede autoasignarse.</div>
+          {datos.rolElegido && <>
+            <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Creá tu contraseña</label>
+            <input type="password" value={password} onChange={e => { setPassword(e.target.value); setError(''); }}
+              placeholder="mínimo 4 caracteres" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 10, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
+            <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Repetila</label>
+            <input type="password" value={password2} onChange={e => { setPassword2(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && crearPassword(datos.rolElegido)}
+              placeholder="repetir" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 4, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
+            {error && <p style={{ color: '#d32f2f', fontSize: 12.5, margin: '4px 0' }}>{error}</p>}
+            <button onClick={() => crearPassword(datos.rolElegido)} disabled={cargando} style={{ width: '100%', marginTop: 12, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: cargando ? .6 : 1 }}>
+              <LogIn size={18} /> {cargando ? 'Creando cuenta...' : 'Crear cuenta e ingresar'}
+            </button>
+          </>}
+          <button onClick={volver} style={{ width: '100%', marginTop: 10, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
         </>}
       </div>
     </div>
@@ -217,13 +308,13 @@ function Header({ usuario, onLogout, esMovil, onToggleMenu }) {
 function Sidebar({ vista, setVista, rol, usuario }) {
   const carrito = useCarrito();
   const items = [
-    { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['supervisor', 'dueno', 'deposito'] },
-    { id: 'stock', label: 'Stock General', icon: Boxes, roles: ['supervisor', 'dueno', 'deposito'] },
+    { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
+    { id: 'stock', label: 'Stock General', icon: Boxes, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
     { id: 'refrigerantes', label: 'Refrigerantes', icon: Droplets, roles: ['supervisor', 'dueno', 'deposito'] },
-    { id: 'cobre', label: 'Cañería de Cobre', icon: Wrench, roles: ['supervisor', 'dueno', 'deposito'] },
-    { id: 'vehiculos', label: 'Vehículos', icon: Truck, roles: ['supervisor', 'dueno', 'deposito'] },
-    { id: 'carrito', label: 'Mi Pedido', icon: ShoppingCart, roles: ['supervisor'], badge: carrito.length },
-    { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'dueno', 'deposito'] },
+    { id: 'cobre', label: 'Cañería de Cobre', icon: Wrench, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
+    { id: 'vehiculos', label: 'Vehículos', icon: Truck, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
+    { id: 'carrito', label: 'Mi Pedido', icon: ShoppingCart, roles: ['supervisor', 'tecnico'], badge: carrito.length },
+    { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
   ];
   const misBases = basesPermitidas(usuario.mail);
   return (
@@ -249,6 +340,13 @@ function Sidebar({ vista, setVista, rol, usuario }) {
               <MapPin size={18} strokeWidth={active ? 2.4 : 2} /> <span style={{ flex: 1 }}>{b.label}</span>
             </button>);
         })}
+      </>}
+      {accesoTotal(usuario) && <>
+        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', padding: '16px 12px 10px', position: 'relative' }}>Administración</div>
+        <button onClick={() => setVista('usuarios')}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', marginBottom: 5, borderRadius: 11, border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 14, fontFamily: "'Sora', sans-serif", fontWeight: vista === 'usuarios' ? 600 : 500, background: vista === 'usuarios' ? `linear-gradient(135deg, #7C3AED, #A78BFA)` : 'transparent', color: vista === 'usuarios' ? '#fff' : 'rgba(255,255,255,0.6)', boxShadow: vista === 'usuarios' ? '0 8px 20px rgba(124,58,237,0.4)' : 'none', transition: 'all .18s' }}>
+          <Users size={18} strokeWidth={vista === 'usuarios' ? 2.4 : 2} /> <span style={{ flex: 1 }}>Usuarios</span>
+        </button>
       </>}
       <div style={{ position: 'relative', marginTop: 24, fontSize: 10.5, color: 'rgba(255,255,255,0.3)', textAlign: 'center', fontFamily: "'Sora', sans-serif", letterSpacing: '.5px' }}>CHILLER SYSTEM · 2026</div>
     </aside>
@@ -351,7 +449,7 @@ function Stock({ rol, usuario }) {
   const [modalEditar, setModalEditar] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
   const carrito = useCarrito();
-  const esDeposito = rol === 'deposito';
+  const esDeposito = rol === 'deposito' || accesoTotal(usuario);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -435,13 +533,13 @@ function Stock({ rol, usuario }) {
                   <td style={td}><DepBadge dep={s.deposito} /></td>
                   <td style={{ ...td, textAlign: 'center' }}><span style={{ fontWeight: 700, color: s.cantidad === 0 ? '#e53935' : s.cantidad <= 2 ? '#f57c00' : '#222', fontSize: 15 }}>{s.cantidad}</span></td>
                   <td style={{ ...td, textAlign: 'center' }}>
-                    {rol === 'supervisor' && <button onClick={() => agregarCarrito(s)} disabled={s.cantidad === 0} style={{ ...btnMini, background: s.cantidad === 0 ? '#ddd' : AZUL, cursor: s.cantidad === 0 ? 'not-allowed' : 'pointer' }}><Plus size={14} /> Pedir</button>}
-                    {rol === 'deposito' && <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
+                    {(rol === 'supervisor' || rol === 'tecnico') && <button onClick={() => agregarCarrito(s)} disabled={s.cantidad === 0} style={{ ...btnMini, background: s.cantidad === 0 ? '#ddd' : AZUL, cursor: s.cantidad === 0 ? 'not-allowed' : 'pointer' }}><Plus size={14} /> Pedir</button>}
+                    {esDeposito && <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
                       <button onClick={() => setModalEntrada(s)} title="Ingreso de stock" style={{ ...btnMini, background: '#0D9488' }}><ArrowDownToLine size={14} /></button>
                       <button onClick={() => setModalEditar(s)} title="Editar" style={{ ...btnMini, background: '#64748b' }}><Edit3 size={14} /></button>
                       <button onClick={() => setConfirmDel(s)} title="Eliminar" style={{ ...btnMini, background: '#fff', color: '#DC2626', border: '1.5px solid #F7C1C1' }}><Trash2 size={14} /></button>
                     </div>}
-                    {rol === 'dueno' && <span style={{ color: '#bbb', fontSize: 12 }}>—</span>}
+                    {rol === 'dueno' && !esDeposito && <span style={{ color: '#bbb', fontSize: 12 }}>—</span>}
                   </td>
                 </tr>))}
             </tbody>
@@ -517,7 +615,7 @@ function Refrigerantes({ rol, usuario }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [filtro, setFiltro] = useState('Todas');
-  const esDeposito = rol === 'deposito';
+  const esDeposito = rol === 'deposito' || accesoTotal(usuario);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -661,7 +759,7 @@ function Cobre({ rol, usuario }) {
   const [movs, setMovs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
-  const esDeposito = rol === 'deposito';
+  const esDeposito = rol === 'deposito' || accesoTotal(usuario);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -822,7 +920,7 @@ function Carrito({ usuario, onIrPedidos }) {
             <Field label="N° de Presupuesto"><input value={datos.presupuesto} onChange={e => setDatos({ ...datos, presupuesto: e.target.value })} placeholder="ej: PPTO-1234" style={inp} /></Field>
             <Field label="Obra"><input value={datos.obra} onChange={e => setDatos({ ...datos, obra: e.target.value })} placeholder="ej: Torre Maipú P20" style={inp} /></Field>
             <Field label="Cliente"><input value={datos.cliente} onChange={e => setDatos({ ...datos, cliente: e.target.value })} placeholder="ej: Banco Galicia" style={inp} /></Field>
-            <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '11px 13px', margin: '6px 0 14px', fontSize: 12.5, color: '#666' }}>Solicitante: <b>{usuario.nombre}</b><br />Queda pendiente de aprobación del dueño.</div>
+            <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '11px 13px', margin: '6px 0 14px', fontSize: 12.5, color: '#666' }}>Solicitante: <b>{usuario.nombre}</b><br />Queda pendiente de aprobación de tu supervisor o del gerente.</div>
             <button onClick={confirmar} disabled={guardando} style={{ ...btnPri, width: '100%', justifyContent: 'center', opacity: guardando ? .6 : 1 }}><CheckCircle2 size={17} /> {guardando ? 'Guardando...' : 'Confirmar pedido'}</button>
           </Card>
         </div>}
@@ -836,6 +934,8 @@ function Pedidos({ rol, usuario }) {
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState('Todos');
   const [confirmDel, setConfirmDel] = useState(null);
+  const [modalAnular, setModalAnular] = useState(null);
+  const [modalDisponibilidad, setModalDisponibilidad] = useState(null);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -847,9 +947,28 @@ function Pedidos({ rol, usuario }) {
   const aprobar = async (id) => { await supabase.from('pedidos').update({ estado: 'aprobado', aprobado_por: usuario.nombre }).eq('id', id); cargar(); };
   const rechazar = async (id) => { await supabase.from('pedidos').update({ estado: 'rechazado', aprobado_por: usuario.nombre }).eq('id', id); cargar(); };
   const eliminar = async (id) => { await supabase.from('pedidos').delete().eq('id', id); setConfirmDel(null); cargar(); };
+
+  const anular = async (id, motivo) => {
+    await supabase.from('pedidos').update({ estado: 'anulado', anulado_por: usuario.nombre, anulado_motivo: motivo || null, anulado_en: new Date().toISOString() }).eq('id', id);
+    setModalAnular(null); cargar();
+  };
+
+  const enviarDisponibilidad = async (pedido, itemsConDisponible) => {
+    for (const it of itemsConDisponible) {
+      await supabase.from('pedido_items').update({ disponible: it.disponible }).eq('id', it.id);
+    }
+    await supabase.from('pedidos').update({ disponibilidad_enviada_por: usuario.nombre, disponibilidad_enviada_en: new Date().toISOString() }).eq('id', pedido.id);
+    setModalDisponibilidad(null); cargar();
+  };
+
+  const confirmarContinuar = async (id) => {
+    await supabase.from('pedidos').update({ confirmado_por: usuario.nombre, confirmado_en: new Date().toISOString() }).eq('id', id);
+    cargar();
+  };
+
   const entregar = async (pedido) => {
     for (const it of pedido.pedido_items) {
-      if (it.producto_id) {
+      if (it.producto_id && it.disponible !== false) {
         const { data: prod } = await supabase.from('productos').select('cantidad').eq('id', it.producto_id).single();
         if (prod) await supabase.from('productos').update({ cantidad: Math.max(0, prod.cantidad - it.cantidad) }).eq('id', it.producto_id);
       }
@@ -858,7 +977,11 @@ function Pedidos({ rol, usuario }) {
     cargar();
   };
 
-  const puedeBorrar = (p) => rol === 'dueno' || rol === 'deposito' || (rol === 'supervisor' && p.mail === usuario.mail);
+  const puedeAnular = (p) => (rol === 'dueno' || rol === 'deposito' || accesoTotal(usuario) || p.mail === usuario.mail) && (p.estado === 'pendiente' || p.estado === 'aprobado');
+  const puedeEliminarDef = rol === 'dueno' || accesoTotal(usuario); // borrado definitivo, uso administrativo puntual
+  const esperandoConfirmacionSolicitante = (p) => p.disponibilidad_enviada_en && !p.confirmado_en;
+  const puedeConfirmar = (p) => p.mail === usuario.mail || rol === 'dueno' || accesoTotal(usuario);
+
   const lista = filtro === 'Todos' ? pedidos : pedidos.filter(p => p.estado === filtro);
   const fmt = (iso) => new Date(iso).toLocaleString('es-AR');
 
@@ -866,7 +989,7 @@ function Pedidos({ rol, usuario }) {
     <div>
       <SectionTitle icon={ClipboardList} title="Pedidos" sub="Registro y seguimiento de solicitudes" accion={<BotonRefrescar onClick={cargar} />} />
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        {['Todos', 'pendiente', 'aprobado', 'entregado', 'rechazado'].map(f => (
+        {['Todos', 'pendiente', 'aprobado', 'entregado', 'rechazado', 'anulado'].map(f => (
           <button key={f} onClick={() => setFiltro(f)} style={{ padding: '7px 14px', borderRadius: 20, border: '1.5px solid ' + (filtro === f ? AZUL : '#ddd'), background: filtro === f ? AZUL : '#fff', color: filtro === f ? '#fff' : '#666', fontSize: 13, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize' }}>{f}</button>))}
       </div>
       {loading ? <Cargando /> : lista.length === 0 ? <Card><Empty texto="No hay pedidos en este estado" /></Card>
@@ -877,7 +1000,10 @@ function Pedidos({ rol, usuario }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><span style={{ fontSize: 19, fontWeight: 800, color: AZUL }}>Pedido #{p.numero}</span><EstadoBadge estado={p.estado} /></div>
                 <div style={{ fontSize: 12.5, color: '#999', marginTop: 4 }}>{fmt(p.creado_en)}</div>
               </div>
-              {puedeBorrar(p) && <button onClick={() => setConfirmDel(p)} style={{ background: '#fff', border: '1.5px solid #ffcdd2', color: '#c62828', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 600 }}><Trash2 size={15} /> Eliminar</button>}
+              <div style={{ display: 'flex', gap: 8 }}>
+                {puedeAnular(p) && <button onClick={() => setModalAnular(p)} style={{ background: '#fff', border: '1.5px solid #FBBF24', color: '#B45309', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 600 }}><XCircle size={15} /> Anular</button>}
+                {puedeEliminarDef && <button onClick={() => setConfirmDel(p)} style={{ background: '#fff', border: '1.5px solid #ffcdd2', color: '#c62828', borderRadius: 8, padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 600 }}><Trash2 size={15} /></button>}
+              </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14, fontSize: 13 }}>
               <Info icon={User} label="Solicitante" value={p.solicitante} />
@@ -886,22 +1012,82 @@ function Pedidos({ rol, usuario }) {
               <Info icon={Building2} label="Obra" value={p.obra || '—'} />
               <Info icon={User} label="Cliente" value={p.cliente || '—'} />
               {p.aprobado_por && <Info icon={CheckCircle2} label={p.estado === 'rechazado' ? 'Rechazado por' : 'Aprobado por'} value={p.aprobado_por} />}
+              {p.estado === 'anulado' && <Info icon={XCircle} label="Anulado por" value={p.anulado_por || '—'} />}
             </div>
+            {p.estado === 'anulado' && p.anulado_motivo && <div style={{ background: '#FEF3E2', borderRadius: 9, padding: '9px 13px', marginBottom: 12, fontSize: 13, color: '#B45309' }}><b>Motivo:</b> {p.anulado_motivo}</div>}
             <div style={{ background: '#F8F9FC', borderRadius: 9, padding: '10px 14px', marginBottom: 14 }}>
-              {(p.pedido_items || []).map((it, i) => (<div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}><span>{it.nombre} <span style={{ color: '#aaa' }}>· {it.deposito}</span></span><b>x{it.cantidad}</b></div>))}
+              {(p.pedido_items || []).map((it, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '3px 0' }}>
+                  <span>{it.nombre} <span style={{ color: '#aaa' }}>· {it.deposito}</span></span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {it.disponible === true && <span style={{ color: '#059669', fontSize: 11.5, fontWeight: 700 }}>✓ Disponible</span>}
+                    {it.disponible === false && <span style={{ color: '#DC2626', fontSize: 11.5, fontWeight: 700 }}>✗ No hay</span>}
+                    <b>x{it.cantidad}</b>
+                  </span>
+                </div>))}
             </div>
+
             {(rol === 'dueno' || rol === 'supervisor') && p.estado === 'pendiente' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={() => aprobar(p.id)} style={{ ...btnPri, background: '#059669' }}><CheckCircle2 size={16} /> Aprobar</button>
               <button onClick={() => rechazar(p.id)} style={{ ...btnSec, color: '#DC2626', borderColor: '#DC2626' }}><XCircle size={16} /> Rechazar</button></div>}
-            {rol === 'deposito' && p.estado === 'aprobado' && <button onClick={() => entregar(p)} style={{ ...btnPri, background: '#0D9488' }}><ArrowUpFromLine size={16} /> Marcar entregado (descuenta stock)</button>}
+
+            {(rol === 'deposito' || accesoTotal(usuario)) && p.estado === 'aprobado' && !p.disponibilidad_enviada_en && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button onClick={() => entregar(p)} style={{ ...btnPri, background: '#0D9488' }}><ArrowUpFromLine size={16} /> Marcar entregado (descuenta stock)</button>
+              <button onClick={() => setModalDisponibilidad(p)} style={{ ...btnSec }}><ClipboardList size={16} /> Revisar disponibilidad</button>
+            </div>}
+
+            {esperandoConfirmacionSolicitante(p) && <div style={{ background: '#E6F1FB', border: '1px solid #BBD9F5', borderRadius: 9, padding: '11px 14px', fontSize: 13, color: '#0C447C' }}>
+              <div style={{ marginBottom: puedeConfirmar(p) ? 10 : 0 }}>📋 Depósito ({p.disponibilidad_enviada_por}) revisó el pedido — mirá arriba qué ítems tiene y cuáles no. {puedeConfirmar(p) ? 'Confirmá para continuar.' : `Esperando confirmación de ${p.solicitante}.`}</div>
+              {puedeConfirmar(p) && <button onClick={() => confirmarContinuar(p.id)} style={{ ...btnPri, background: '#0284C7' }}><CheckCircle2 size={16} /> Confirmar y continuar</button>}
+            </div>}
+
+            {(rol === 'deposito' || accesoTotal(usuario)) && p.estado === 'aprobado' && p.confirmado_en && <button onClick={() => entregar(p)} style={{ ...btnPri, background: '#0D9488' }}><ArrowUpFromLine size={16} /> Marcar entregado (descuenta stock)</button>}
             {rol === 'deposito' && p.estado === 'pendiente' && <div style={{ fontSize: 13, color: '#D97706', fontWeight: 600 }}>⏳ Esperando aprobación para poder entregar</div>}
           </div>))}
+
       {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
-        <h3 style={{ margin: '0 0 8px', color: '#c62828' }}>Eliminar pedido #{confirmDel.numero}</h3>
-        <p style={{ fontSize: 14, color: '#555', margin: '0 0 18px' }}>Esta acción no se puede deshacer. ¿Seguro?</p>
+        <h3 style={{ margin: '0 0 8px', color: '#c62828' }}>Eliminar definitivamente pedido #{confirmDel.numero}</h3>
+        <p style={{ fontSize: 14, color: '#555', margin: '0 0 18px' }}>Esto borra el registro por completo (no queda historial). Para el caso de "no había stock", usá mejor <b>Anular</b>. ¿Seguro que querés eliminarlo?</p>
         <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminar(confirmDel.id)} style={{ ...btnPri, flex: 1, background: '#c62828' }}><Trash2 size={16} /> Sí, eliminar</button></div>
       </ModalShell>}
+
+      {modalAnular && <ModalAnularPedido pedido={modalAnular} onClose={() => setModalAnular(null)} onConfirm={(motivo) => anular(modalAnular.id, motivo)} />}
+      {modalDisponibilidad && <ModalDisponibilidad pedido={modalDisponibilidad} onClose={() => setModalDisponibilidad(null)} onConfirm={(items) => enviarDisponibilidad(modalDisponibilidad, items)} />}
     </div>
+  );
+}
+
+function ModalAnularPedido({ pedido, onClose, onConfirm }) {
+  const [motivo, setMotivo] = useState('');
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 8px', color: '#B45309' }}>Anular pedido #{pedido.numero}</h3>
+      <p style={{ fontSize: 14, color: '#475569', margin: '0 0 14px' }}>Por ejemplo, porque en depósito no hay algún ítem solicitado. El pedido queda registrado como anulado, con el motivo si querés dejarlo.</p>
+      <Field label="Motivo (opcional)"><textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="ej: no hay stock del compresor solicitado" style={{ ...inp, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Volver</button><button onClick={() => onConfirm(motivo)} style={{ ...btnPri, flex: 1, background: '#B45309' }}><XCircle size={16} /> Anular pedido</button></div>
+    </ModalShell>
+  );
+}
+
+function ModalDisponibilidad({ pedido, onClose, onConfirm }) {
+  const [items, setItems] = useState((pedido.pedido_items || []).map(it => ({ ...it, disponible: it.disponible !== false })));
+  const toggle = (id) => setItems(items.map(it => it.id === id ? { ...it, disponible: !it.disponible } : it));
+  const faltantes = items.filter(it => !it.disponible).length;
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 6px', color: AZUL }}>Revisar disponibilidad — Pedido #{pedido.numero}</h3>
+      <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 16px' }}>Marcá qué ítems tenés en depósito. Se le va a avisar a {pedido.solicitante} para que confirme antes de entregar.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+        {items.map(it => (
+          <button key={it.id} onClick={() => toggle(it.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 13px', borderRadius: 10, border: '1.5px solid ' + (it.disponible ? '#A7F3D0' : '#FCA5A5'), background: it.disponible ? '#F0FDF4' : '#FEF2F2', cursor: 'pointer', textAlign: 'left' }}>
+            <span style={{ fontSize: 13.5, color: TINTA }}>{it.nombre} <span style={{ color: '#94a3b8' }}>x{it.cantidad} · {it.deposito}</span></span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: it.disponible ? '#059669' : '#DC2626' }}>{it.disponible ? '✓ Tengo' : '✗ No tengo'}</span>
+          </button>
+        ))}
+      </div>
+      {faltantes > 0 && <div style={{ background: '#FEF3E2', borderRadius: 9, padding: '9px 13px', marginBottom: 14, fontSize: 12.5, color: '#B45309' }}>{faltantes} ítem(s) marcado(s) como no disponibles. El solicitante lo va a ver antes de confirmar.</div>}
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => onConfirm(items)} style={{ ...btnPri, flex: 1 }}><ClipboardList size={16} /> Enviar confirmación</button></div>
+    </ModalShell>
   );
 }
 
@@ -914,7 +1100,7 @@ function Vehiculos({ rol, usuario }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [detalle, setDetalle] = useState(null);
-  const puedeEditar = rol === 'deposito' || rol === 'dueno';
+  const puedeEditar = rol === 'deposito' || rol === 'dueno' || accesoTotal(usuario);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -1142,7 +1328,7 @@ function ModalHistorialVehiculo({ vehiculo, puedeEditar, usuario, onClose, onAct
   useEffect(() => { cargar(); }, [cargar]);
 
   // ¿puede editar este uso? solo quien lo registró o el dueño
-  const puedeEditarUso = (u) => usuario.rol === 'dueno' || u.usuario === usuario.nombre;
+  const puedeEditarUso = (u) => usuario.rol === 'dueno' || accesoTotal(usuario) || u.usuario === usuario.nombre;
 
   const guardarEdicionUso = async (id, datos) => {
     await supabase.from('usos_vehiculo').update({ km_inicio: datos.km_inicio, km_fin: datos.km_fin, nota: datos.nota || null }).eq('id', id);
@@ -1506,7 +1692,136 @@ function ModalItemBase({ rubros, onClose, onConfirm, editar, item }) {
 }
 
 
+
+// ========================= USUARIOS (gestión) =========================
+function GestionUsuarios({ usuario }) {
+  const [usuarios, setUsuarios] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modalNuevo, setModalNuevo] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [confirmReset, setConfirmReset] = useState(null);
+  const [msg, setMsg] = useState('');
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.from('usuarios_public').select('*').order('nombre');
+    if (!error) setUsuarios(data || []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const crear = async (u) => {
+    const mail = u.mail.trim().toLowerCase();
+    const { error } = await supabase.from('usuarios').insert({ mail, nombre: u.nombre, rol: u.rol });
+    if (error) { setMsg('No se pudo agregar: ' + (error.message.includes('duplicate') ? 'ese correo ya existe.' : error.message)); return; }
+    setModalNuevo(false); setMsg(`✓ ${u.nombre} agregado. Va a crear su propia contraseña la primera vez que entre.`);
+    cargar();
+  };
+
+  const cambiarRol = async (mail, rol) => {
+    await supabase.from('usuarios').update({ rol }).eq('mail', mail);
+    cargar();
+  };
+
+  const eliminar = async (mail) => {
+    await supabase.from('usuarios').delete().eq('mail', mail);
+    setConfirmDel(null); cargar();
+  };
+
+  const resetPassword = async (mail) => {
+    await supabase.rpc('resetear_password_usuario', { p_mail: mail });
+    setConfirmReset(null); setMsg('✓ Contraseña restablecida. Esa persona va a tener que crear una nueva al entrar.');
+    cargar();
+  };
+
+  const ROLES = [['dueno', 'Gerente'], ['supervisor', 'Supervisor'], ['tecnico', 'Técnico'], ['deposito', 'Depósito / Logística']];
+
+  return (
+    <div>
+      <SectionTitle icon={Users} title="Usuarios" sub={`${usuarios.length} personas con acceso`} accion={<button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar usuario</button>} />
+
+      {msg && <div style={{ background: msg.startsWith('✓') ? '#E7F8EF' : '#FEECEC', color: msg.startsWith('✓') ? '#059669' : '#DC2626', borderRadius: 10, padding: '11px 15px', marginBottom: 14, fontSize: 13.5, fontWeight: 600 }}>{msg}</div>}
+
+      <div style={{ background: '#E6F1FB', border: '1px solid #BBD9F5', borderRadius: 11, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#0C447C' }}>
+        Al agregar a alguien, no hace falta ponerle contraseña: la crea ella misma la primera vez que entra con su correo.
+      </div>
+
+      {loading ? <Cargando /> : (
+        <div style={{ background: '#fff', borderRadius: 16, overflow: 'auto', boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 680 }}>
+            <thead><tr style={{ background: 'linear-gradient(135deg, #7C3AED, #A78BFA)', color: '#fff', textAlign: 'left' }}>
+              <th style={th}>Nombre</th><th style={th}>Correo</th><th style={th}>Rol</th><th style={{ ...th, textAlign: 'center' }}>Contraseña</th><th style={{ ...th, textAlign: 'center', width: 130 }}>Acción</th>
+            </tr></thead>
+            <tbody>
+              {usuarios.map(u => (
+                <tr key={u.mail} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={td}><b style={{ color: '#222' }}>{u.nombre}</b>{ADMIN_MAILS.includes(u.mail.toLowerCase()) && <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 700, color: '#7C3AED', background: '#F3E8FF', padding: '2px 7px', borderRadius: 8 }}>Acceso total</span>}</td>
+                  <td style={{ ...td, color: '#64748b' }}>{u.mail}</td>
+                  <td style={td}>
+                    <select value={u.rol || ''} onChange={e => cambiarRol(u.mail, e.target.value)} style={{ padding: '6px 10px', borderRadius: 8, border: '1.5px solid #e2e8f0', fontSize: 13, background: '#fff', cursor: 'pointer' }}>
+                      {ROLES.map(([r, l]) => <option key={r} value={r}>{l}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    {u.tiene_password
+                      ? <span style={{ background: '#E7F8EF', color: '#059669', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20 }}>Configurada</span>
+                      : <span style={{ background: '#FEF3E2', color: '#D97706', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20 }}>Sin definir</span>}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
+                      {u.tiene_password && <button onClick={() => setConfirmReset(u)} title="Restablecer contraseña" style={{ ...btnMini, background: '#64748b' }}><KeyRound size={14} /></button>}
+                      <button onClick={() => setConfirmDel(u)} title="Quitar acceso" style={{ ...btnMini, background: '#fff', color: '#DC2626', border: '1.5px solid #F7C1C1' }}><Trash2 size={14} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {usuarios.length === 0 && <Empty texto="No hay usuarios cargados todavía" />}
+        </div>
+      )}
+
+      {modalNuevo && <ModalNuevoUsuario roles={ROLES} onClose={() => setModalNuevo(false)} onConfirm={crear} />}
+      {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
+        <h3 style={{ margin: '0 0 8px', color: '#DC2626' }}>Quitar acceso</h3>
+        <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>¿Quitarle el acceso a <b>{confirmDel.nombre}</b> ({confirmDel.mail})? Va a dejar de poder entrar a la app.</p>
+        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminar(confirmDel.mail)} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Quitar acceso</button></div>
+      </ModalShell>}
+      {confirmReset && <ModalShell onClose={() => setConfirmReset(null)}>
+        <h3 style={{ margin: '0 0 8px', color: AZUL }}>Restablecer contraseña</h3>
+        <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}><b>{confirmReset.nombre}</b> va a tener que crear una contraseña nueva la próxima vez que entre. Usalo si se la olvidó.</p>
+        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmReset(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => resetPassword(confirmReset.mail)} style={{ ...btnPri, flex: 1 }}><KeyRound size={16} /> Restablecer</button></div>
+      </ModalShell>}
+    </div>
+  );
+}
+
+function ModalNuevoUsuario({ roles, onClose, onConfirm }) {
+  const [f, setF] = useState({ nombre: '', mail: '', rol: 'tecnico' });
+  const set = (k, v) => setF({ ...f, [k]: v });
+  const valido = f.nombre.trim() && f.mail.trim().toLowerCase().endsWith('@chillersystem.com');
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 16px', color: AZUL }}>Agregar usuario</h3>
+      <Field label="Nombre completo *"><input value={f.nombre} onChange={e => set('nombre', e.target.value)} placeholder="ej: Juan Pérez" style={inp} /></Field>
+      <Field label="Correo *"><input value={f.mail} onChange={e => set('mail', e.target.value)} placeholder="nombre@chillersystem.com" style={inp} /></Field>
+      <Field label="Rol"><select value={f.rol} onChange={e => set('rol', e.target.value)} style={inp}>{roles.map(([r, l]) => <option key={r} value={r}>{l}</option>)}</select></Field>
+      <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '9px 12px', margin: '4px 0 14px', fontSize: 12, color: '#666' }}>No hace falta contraseña: la persona la crea sola al entrar por primera vez.</div>
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => valido && onConfirm(f)} disabled={!valido} style={{ ...btnPri, flex: 1, opacity: valido ? 1 : .5 }}>Agregar</button></div>
+    </ModalShell>
+  );
+}
+
+
 // ========================= AUXILIARES =========================
+function AccesoDenegado({ titulo, mensaje }) {
+  return (
+    <div>
+      <SectionTitle icon={Lock} title={titulo || 'Acceso restringido'} sub="Acceso restringido" />
+      <Card><div style={{ textAlign: 'center', padding: '30px 20px', color: '#94a3b8' }}><Lock size={36} color="#cbd5e1" style={{ marginBottom: 10 }} /><div>{mensaje || 'No tenés permiso para ver esta sección.'}</div></div></Card>
+    </div>
+  );
+}
 function SectionTitle({ icon: Icon, title, sub, accion }) {
   return (
     <div className="fadein" style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
@@ -1525,7 +1840,7 @@ function Cargando() { return <div style={{ textAlign: 'center', padding: 50, col
 function Select({ value, onChange, options }) { return <select value={value} onChange={e => onChange(e.target.value)} style={{ padding: '10px 14px', borderRadius: 10, border: '1.5px solid #e2e8f0', fontSize: 14, background: '#fff', cursor: 'pointer', outline: 'none', color: TINTA, fontWeight: 500 }}>{options.map(o => <option key={o}>{o}</option>)}</select>; }
 function Field({ label, children }) { return <div style={{ marginBottom: 12 }}><label style={{ fontSize: 12.5, fontWeight: 600, color: '#475569', display: 'block', marginBottom: 5 }}>{label}</label>{children}</div>; }
 function Info({ icon: Icon, label, value }) { return <div style={{ background: '#F8FAFC', borderRadius: 10, padding: '9px 12px', border: '1px solid #f1f5f9' }}><div style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500 }}><Icon size={12} /> {label}</div><div style={{ fontSize: 13.5, fontWeight: 700, color: TINTA, marginTop: 2 }}>{value}</div></div>; }
-function EstadoBadge({ estado }) { const map = { pendiente: ['#FEF3E2', '#D97706', 'Pendiente'], aprobado: ['#E7F8EF', '#059669', 'Aprobado'], entregado: ['#E6F3FE', '#0284C7', 'Entregado'], rechazado: ['#FEECEC', '#DC2626', 'Rechazado'] }; const [bg, col, txt] = map[estado] || map.pendiente; return <span style={{ background: bg, color: col, fontSize: 11.5, fontWeight: 700, padding: '4px 12px', borderRadius: 20 }}>{txt}</span>; }
+function EstadoBadge({ estado }) { const map = { pendiente: ['#FEF3E2', '#D97706', 'Pendiente'], aprobado: ['#E7F8EF', '#059669', 'Aprobado'], entregado: ['#E6F3FE', '#0284C7', 'Entregado'], rechazado: ['#FEECEC', '#DC2626', 'Rechazado'], anulado: ['#F1F5F9', '#64748B', 'Anulado'] }; const [bg, col, txt] = map[estado] || map.pendiente; return <span style={{ background: bg, color: col, fontSize: 11.5, fontWeight: 700, padding: '4px 12px', borderRadius: 20 }}>{txt}</span>; }
 function DepBadge({ dep }) { const col = dep === 'Caseros' ? AZUL : '#0D9488'; return <span style={{ background: col + '12', color: col, fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 7 }}>{dep}</span>; }
 function ModalShell({ children, onClose }) { return <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(7,11,52,0.55)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 16 }}><div onClick={e => e.stopPropagation()} className="fadein" style={{ background: '#fff', borderRadius: 18, padding: 28, width: 430, maxWidth: '100%', boxShadow: '0 30px 80px rgba(7,11,52,0.4)' }}>{children}</div></div>; }
 function gasColor(g) { const m = { r410a: '#0284C7', r134a: '#7C3AED', r22: '#EA580C', r32: '#059669' }; return m[(g || '').toLowerCase()] || '#0284C7'; }
