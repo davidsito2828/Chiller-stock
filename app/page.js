@@ -450,8 +450,8 @@ function Stock({ rol, usuario }) {
   const [modalEditar, setModalEditar] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
   const [solicitudTexto, setSolicitudTexto] = useState('');
-  const [enviandoSolicitud, setEnviandoSolicitud] = useState(false);
-  const [solicitudes, setSolicitudes] = useState([]);
+  const [solicitudDeposito, setSolicitudDeposito] = useState('Caseros');
+  const [agregado, setAgregado] = useState(false);
   const carrito = useCarrito();
   const esDeposito = rol === 'deposito' || accesoTotal(usuario);
   const puedeSolicitar = rol === 'supervisor' || rol === 'tecnico';
@@ -464,34 +464,16 @@ function Stock({ rol, usuario }) {
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const cargarSolicitudes = useCallback(async () => {
-    const { data } = await supabase.from('solicitudes_producto').select('*').order('creado_en', { ascending: false });
-    setSolicitudes(data || []);
-  }, []);
-  useEffect(() => { cargarSolicitudes(); }, [cargarSolicitudes]);
-
-  const enviarSolicitud = async () => {
+  // Agrega un producto que no está en el catálogo directo al carrito ("Mi Pedido"),
+  // marcado como "a comprar". Viaja junto con el resto del pedido, no aparte.
+  const agregarNuevoAlCarrito = () => {
     const nombre = solicitudTexto.trim();
     if (!nombre) return;
-    setEnviandoSolicitud(true);
-    await supabase.from('solicitudes_producto').insert({ nombre_solicitado: nombre, solicitado_por: usuario.nombre, mail: usuario.mail });
-    setSolicitudTexto(''); setEnviandoSolicitud(false);
-    cargarSolicitudes();
+    carritoStore.add({ id: 'nuevo-' + Date.now(), n: nombre, ma: '', co: '', dep: solicitudDeposito, qty: 1, disp: null, esNuevo: true });
+    setSolicitudTexto('');
+    setAgregado(true);
+    setTimeout(() => setAgregado(false), 2000);
   };
-
-  const guardarSolicitudEnCatalogo = async (sol, nombreFinal, depositoDestino) => {
-    const { data: nuevo } = await supabase.from('productos').insert({ nombre: nombreFinal, categoria: 'General', deposito: depositoDestino, cantidad: 0 }).select().single();
-    await supabase.from('solicitudes_producto').update({ estado: 'guardado', nombre_final: nombreFinal, deposito: depositoDestino, producto_id: nuevo?.id, revisado_por: usuario.nombre, revisado_en: new Date().toISOString() }).eq('id', sol.id);
-    cargarSolicitudes(); cargar();
-  };
-
-  const descartarSolicitud = async (id) => {
-    await supabase.from('solicitudes_producto').update({ estado: 'descartado', revisado_por: usuario.nombre, revisado_en: new Date().toISOString() }).eq('id', id);
-    cargarSolicitudes();
-  };
-
-  const misSolicitudes = solicitudes.filter(s => s.mail === usuario.mail);
-  const solicitudesPendientes = solicitudes.filter(s => s.estado === 'pendiente');
 
   // Rubros fijos + los que ya existan en la base
   const RUBROS = ['Herramientas', 'Insumos', 'Materiales', 'Repuestos'];
@@ -553,32 +535,14 @@ function Stock({ rol, usuario }) {
 
       {puedeSolicitar && (
         <div style={{ background: '#fff', borderRadius: 13, padding: 14, marginBottom: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: TINTA, marginBottom: 8 }}>¿No encontrás el producto? Solicitalo</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: TINTA, marginBottom: 8 }}>¿No encontrás el producto? Agregalo a tu pedido para que depósito lo compre</div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <input value={solicitudTexto} onChange={e => setSolicitudTexto(e.target.value)} onKeyDown={e => e.key === 'Enter' && enviarSolicitud()}
+            <input value={solicitudTexto} onChange={e => setSolicitudTexto(e.target.value)} onKeyDown={e => e.key === 'Enter' && agregarNuevoAlCarrito()}
               placeholder="ej: sensor de presión para equipo Carrier 3TR" style={{ ...inp, flex: 1, minWidth: 220 }} />
-            <button onClick={enviarSolicitud} disabled={enviandoSolicitud || !solicitudTexto.trim()} style={{ ...btnPri, opacity: (!solicitudTexto.trim() || enviandoSolicitud) ? .5 : 1 }}><Plus size={16} /> Solicitar</button>
+            <select value={solicitudDeposito} onChange={e => setSolicitudDeposito(e.target.value)} style={{ ...inp, flex: '0 0 130px' }}><option>Caseros</option><option>Mataderos</option></select>
+            <button onClick={agregarNuevoAlCarrito} disabled={!solicitudTexto.trim()} style={{ ...btnPri, background: '#7C3AED', opacity: !solicitudTexto.trim() ? .5 : 1 }}><Plus size={16} /> Agregar a Mi Pedido</button>
           </div>
-          {misSolicitudes.length > 0 && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 7 }}>Tus solicitudes</div>
-              {misSolicitudes.slice(0, 6).map(s => (
-                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: '#F8FAFC', borderRadius: 8, marginBottom: 5, fontSize: 13 }}>
-                  <span>{s.nombre_solicitado}{s.nombre_final && s.nombre_final !== s.nombre_solicitado && <span style={{ color: '#94a3b8' }}> → {s.nombre_final}</span>}</span>
-                  <EstadoSolicitudBadge estado={s.estado} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {esDeposito && solicitudesPendientes.length > 0 && (
-        <div style={{ background: '#FFF8E1', border: '1px solid #ffe082', borderRadius: 13, padding: 16, marginBottom: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#7c5800', marginBottom: 12 }}>📋 {solicitudesPendientes.length} solicitud{solicitudesPendientes.length > 1 ? 'es' : ''} de producto{solicitudesPendientes.length > 1 ? 's' : ''} nuevo{solicitudesPendientes.length > 1 ? 's' : ''} para revisar</div>
-          {solicitudesPendientes.map(s => (
-            <FilaSolicitudPendiente key={s.id} sol={s} onGuardar={guardarSolicitudEnCatalogo} onDescartar={descartarSolicitud} />
-          ))}
+          {agregado && <div style={{ marginTop: 10, fontSize: 12.5, color: '#059669', fontWeight: 600 }}>✓ Agregado a "Mi Pedido" — se manda junto con el resto cuando confirmes el pedido.</div>}
         </div>
       )}
 
@@ -628,31 +592,6 @@ function RubroBadge({ rubro }) {
   const colores = { Herramientas: '#8B5CF6', Insumos: '#0EA5E9', Materiales: '#F59E0B', Repuestos: '#10B981' };
   const col = colores[rubro] || '#64748b';
   return <span style={{ background: col + '18', color: col, fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 6 }}>{rubro || 'General'}</span>;
-}
-function EstadoSolicitudBadge({ estado }) {
-  const map = { pendiente: ['#FEF3E2', '#D97706', 'Pendiente'], guardado: ['#E7F8EF', '#059669', 'Agregado al catálogo'], descartado: ['#F1F5F9', '#64748B', 'Descartado'] };
-  const [bg, col, txt] = map[estado] || map.pendiente;
-  return <span style={{ background: bg, color: col, fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap' }}>{txt}</span>;
-}
-function FilaSolicitudPendiente({ sol, onGuardar, onDescartar }) {
-  const [nombre, setNombre] = useState(sol.nombre_solicitado);
-  const [deposito, setDeposito] = useState('Caseros');
-  const [guardando, setGuardando] = useState(false);
-  const guardar = async () => {
-    if (!nombre.trim()) return;
-    setGuardando(true);
-    await onGuardar(sol, nombre.trim(), deposito);
-    setGuardando(false);
-  };
-  return (
-    <div style={{ background: '#fff', borderRadius: 10, padding: 12, marginBottom: 9, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-      <input value={nombre} onChange={e => setNombre(e.target.value)} style={{ ...inp, flex: 2, minWidth: 200 }} />
-      <select value={deposito} onChange={e => setDeposito(e.target.value)} style={{ ...inp, flex: '0 0 130px' }}><option>Caseros</option><option>Mataderos</option></select>
-      <div style={{ fontSize: 11.5, color: '#94a3b8', flex: '0 0 100%' }}>Pidió: {sol.solicitado_por} · {new Date(sol.creado_en).toLocaleDateString('es-AR')}{nombre !== sol.nombre_solicitado && <span> · original: "{sol.nombre_solicitado}"</span>}</div>
-      <button onClick={guardar} disabled={guardando} style={{ ...btnPri, background: '#059669', padding: '9px 14px', opacity: guardando ? .6 : 1 }}><CheckCircle2 size={15} /> Guardar en catálogo</button>
-      <button onClick={() => onDescartar(sol.id)} style={{ ...btnSec, padding: '9px 14px' }}><XCircle size={15} /> Descartar</button>
-    </div>
-  );
 }
 function ModalNuevoProducto({ rubros, onClose, onConfirm, editar, producto }) {
   const [f, setF] = useState(editar && producto
@@ -981,7 +920,12 @@ function Carrito({ usuario, onIrPedidos }) {
       razon_social: datos.razon_social, presupuesto: datos.presupuesto || null, obra: datos.obra || null, cliente: datos.cliente || null, estado: 'pendiente',
     }).select().single();
     if (pedido) {
-      await supabase.from('pedido_items').insert(carrito.map(c => ({ pedido_id: pedido.id, producto_id: c.id, nombre: c.n, marca: c.ma, deposito: c.dep, cantidad: c.qty })));
+      await supabase.from('pedido_items').insert(carrito.map(c => ({
+        pedido_id: pedido.id,
+        producto_id: c.esNuevo ? null : c.id,
+        nombre: c.n, marca: c.ma, deposito: c.dep, cantidad: c.qty,
+        es_nuevo: !!c.esNuevo,
+      })));
       await supabase.from('contador_pedidos').update({ ultimo: nuevoNum }).eq('id', 1);
     }
     carritoStore.set([]);
@@ -996,8 +940,12 @@ function Carrito({ usuario, onIrPedidos }) {
         : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 18 }}>
           <Card title={`Productos solicitados (${carrito.length})`}>
             {carrito.map(c => (
-              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 0', borderBottom: '1px solid #f0f0f0' }}>
-                <div style={{ flex: 1 }}><b style={{ fontSize: 14, color: '#222' }}>{c.n}</b><div style={{ fontSize: 12, color: '#999' }}>{c.ma} · {c.dep} · disp: {c.disp}</div></div>
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 8px', marginBottom: 4, borderRadius: 9, background: c.esNuevo ? '#F3E8FF' : 'transparent', border: c.esNuevo ? '1px solid #DDD6FE' : 'none', borderBottom: c.esNuevo ? '1px solid #DDD6FE' : '1px solid #f0f0f0' }}>
+                <div style={{ flex: 1 }}>
+                  <b style={{ fontSize: 14, color: '#222' }}>{c.n}</b>
+                  {c.esNuevo ? <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 700, color: '#7C3AED', background: '#EDE9FE', padding: '2px 8px', borderRadius: 20 }}>🆕 A comprar</span> : null}
+                  <div style={{ fontSize: 12, color: '#999' }}>{c.esNuevo ? `Depósito destino: ${c.dep}` : `${c.ma} · ${c.dep} · disp: ${c.disp}`}</div>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                   <button onClick={() => cambiarQty(c.id, -1)} style={qtyBtnSm}><Minus size={13} /></button>
                   <span style={{ fontWeight: 700, minWidth: 22, textAlign: 'center' }}>{c.qty}</span>
@@ -1012,6 +960,7 @@ function Carrito({ usuario, onIrPedidos }) {
             <Field label="Obra"><input value={datos.obra} onChange={e => setDatos({ ...datos, obra: e.target.value })} placeholder="ej: Torre Maipú P20" style={inp} /></Field>
             <Field label="Cliente"><input value={datos.cliente} onChange={e => setDatos({ ...datos, cliente: e.target.value })} placeholder="ej: Banco Galicia" style={inp} /></Field>
             <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '11px 13px', margin: '6px 0 14px', fontSize: 12.5, color: '#666' }}>Solicitante: <b>{usuario.nombre}</b><br />Queda pendiente de aprobación de tu supervisor o del gerente.</div>
+            {carrito.some(c => c.esNuevo) && <div style={{ background: '#F3E8FF', borderRadius: 9, padding: '11px 13px', margin: '0 0 14px', fontSize: 12.5, color: '#6D28D9' }}>🆕 Este pedido incluye productos que no están en el catálogo — depósito los va a ver marcados para comprar.</div>}
             <button onClick={confirmar} disabled={guardando} style={{ ...btnPri, width: '100%', justifyContent: 'center', opacity: guardando ? .6 : 1 }}><CheckCircle2 size={17} /> {guardando ? 'Guardando...' : 'Confirmar pedido'}</button>
           </Card>
         </div>}
@@ -1047,7 +996,16 @@ function Pedidos({ rol, usuario }) {
 
   const enviarDisponibilidad = async (pedido, itemsConDisponible, observaciones) => {
     for (const it of itemsConDisponible) {
-      await supabase.from('pedido_items').update({ disponible: it.disponible }).eq('id', it.id);
+      if (it.es_nuevo) {
+        // Se crea el producto en el catálogo con cantidad 0: depósito lo compra
+        // y después le da entrada real con "Ingreso de stock" como a cualquier otro.
+        if (!it.producto_id) {
+          const { data: nuevo } = await supabase.from('productos').insert({ nombre: it.nombre, categoria: 'General', deposito: it.deposito, cantidad: 0 }).select().single();
+          await supabase.from('pedido_items').update({ producto_id: nuevo?.id }).eq('id', it.id);
+        }
+      } else {
+        await supabase.from('pedido_items').update({ disponible: it.disponible }).eq('id', it.id);
+      }
     }
     await supabase.from('pedidos').update({
       disponibilidad_enviada_por: usuario.nombre,
@@ -1059,11 +1017,13 @@ function Pedidos({ rol, usuario }) {
     const { data: u } = await supabase.from('usuarios_public').select('telefono').eq('mail', pedido.mail).maybeSingle();
     setModalDisponibilidad(null); cargar();
     if (u?.telefono) {
-      const disp = itemsConDisponible.filter(i => i.disponible).map(i => `✅ ${i.nombre} x${i.cantidad}`).join('\n');
-      const noDisp = itemsConDisponible.filter(i => !i.disponible).map(i => `❌ ${i.nombre} x${i.cantidad}`).join('\n');
+      const disp = itemsConDisponible.filter(i => !i.es_nuevo && i.disponible).map(i => `✅ ${i.nombre} x${i.cantidad}`).join('\n');
+      const noDisp = itemsConDisponible.filter(i => !i.es_nuevo && !i.disponible).map(i => `❌ ${i.nombre} x${i.cantidad}`).join('\n');
+      const aComprar = itemsConDisponible.filter(i => i.es_nuevo).map(i => `🛒 ${i.nombre} x${i.cantidad}`).join('\n');
       let msg = `📦 *Chiller System - Pedido #${pedido.numero}*\nDepósito revisó tu pedido:\n\n`;
-      if (disp) msg += `*Disponible:*\n${disp}\n\n`;
-      if (noDisp) msg += `*No disponible:*\n${noDisp}\n\n`;
+      if (disp) msg += `*Hay en depósito:*\n${disp}\n\n`;
+      if (noDisp) msg += `*No hay:*\n${noDisp}\n\n`;
+      if (aComprar) msg += `*Para comprar:*\n${aComprar}\n\n`;
       if (observaciones) msg += `📝 *Observaciones:*\n${observaciones}\n\n`;
       msg += `Ingresá a la app para confirmar y continuar.`;
       const tel = u.telefono.replace(/\D/g, '');
@@ -1129,15 +1089,17 @@ function Pedidos({ rol, usuario }) {
             {p.estado === 'anulado' && p.anulado_motivo && <div style={{ background: '#FEF3E2', borderRadius: 9, padding: '9px 13px', marginBottom: 12, fontSize: 13, color: '#B45309' }}><b>Motivo:</b> {p.anulado_motivo}</div>}
             <div style={{ background: '#F8F9FC', borderRadius: 9, padding: '10px 14px', marginBottom: 14 }}>
               {(p.pedido_items || []).map((it, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '3px 0' }}>
-                  <span>{it.nombre} <span style={{ color: '#aaa' }}>· {it.deposito}</span></span>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {it.disponible === true && <span style={{ color: '#059669', fontSize: 11.5, fontWeight: 700 }}>✓ Disponible</span>}
-                    {it.disponible === false && <span style={{ color: '#DC2626', fontSize: 11.5, fontWeight: 700 }}>✗ No hay</span>}
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '3px 0', background: it.es_nuevo ? '#F3E8FF' : 'transparent', borderRadius: it.es_nuevo ? 7 : 0 }}>
+                  <span style={it.es_nuevo ? { padding: '2px 6px' } : {}}>{it.nombre} <span style={{ color: '#aaa' }}>· {it.deposito}</span></span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8, padding: it.es_nuevo ? '2px 6px' : 0 }}>
+                    {it.es_nuevo && <span style={{ color: '#7C3AED', fontSize: 11.5, fontWeight: 700 }}>🛒 A comprar</span>}
+                    {!it.es_nuevo && it.disponible === true && <span style={{ color: '#059669', fontSize: 11.5, fontWeight: 700 }}>✓ Disponible</span>}
+                    {!it.es_nuevo && it.disponible === false && <span style={{ color: '#DC2626', fontSize: 11.5, fontWeight: 700 }}>✗ No hay</span>}
                     <b>x{it.cantidad}</b>
                   </span>
                 </div>))}
             </div>
+            {(p.pedido_items || []).some(it => it.es_nuevo) && <div style={{ fontSize: 11.5, color: '#7C3AED', marginTop: -8, marginBottom: 14 }}>🆕 Este pedido incluye productos nuevos que depósito debe comprar.</div>}
 
             {(rol === 'dueno' || rol === 'supervisor') && p.estado === 'pendiente' && <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button onClick={() => aprobar(p.id)} style={{ ...btnPri, background: '#059669' }}><CheckCircle2 size={16} /> Aprobar</button>
@@ -1191,20 +1153,36 @@ function ModalDisponibilidad({ pedido, onClose, onConfirm }) {
   const [items, setItems] = useState((pedido.pedido_items || []).map(it => ({ ...it, disponible: it.disponible !== false })));
   const [observaciones, setObservaciones] = useState(pedido.observaciones_disponibilidad || '');
   const toggle = (id) => setItems(items.map(it => it.id === id ? { ...it, disponible: !it.disponible } : it));
-  const faltantes = items.filter(it => !it.disponible).length;
+  const itemsStock = items.filter(it => !it.es_nuevo);
+  const itemsNuevos = items.filter(it => it.es_nuevo);
+  const faltantes = itemsStock.filter(it => !it.disponible).length;
   return (
     <ModalShell onClose={onClose}>
       <h3 style={{ margin: '0 0 6px', color: AZUL }}>Revisar disponibilidad — Pedido #{pedido.numero}</h3>
       <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 16px' }}>Marcá qué ítems tenés en depósito. Al confirmar se le va a abrir un WhatsApp a {pedido.solicitante} con el resumen.</p>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-        {items.map(it => (
-          <button key={it.id} onClick={() => toggle(it.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 13px', borderRadius: 10, border: '1.5px solid ' + (it.disponible ? '#A7F3D0' : '#FCA5A5'), background: it.disponible ? '#F0FDF4' : '#FEF2F2', cursor: 'pointer', textAlign: 'left' }}>
-            <span style={{ fontSize: 13.5, color: TINTA }}>{it.nombre} <span style={{ color: '#94a3b8' }}>x{it.cantidad} · {it.deposito}</span></span>
-            <span style={{ fontSize: 12, fontWeight: 700, color: it.disponible ? '#059669' : '#DC2626' }}>{it.disponible ? '✓ Tengo' : '✗ No tengo'}</span>
-          </button>
-        ))}
-      </div>
-      {faltantes > 0 && <div style={{ background: '#FEF3E2', borderRadius: 9, padding: '9px 13px', marginBottom: 14, fontSize: 12.5, color: '#B45309' }}>{faltantes} ítem(s) marcado(s) como no disponibles. El solicitante lo va a ver antes de confirmar.</div>}
+      {itemsStock.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {itemsStock.map(it => (
+            <button key={it.id} onClick={() => toggle(it.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 13px', borderRadius: 10, border: '1.5px solid ' + (it.disponible ? '#A7F3D0' : '#FCA5A5'), background: it.disponible ? '#F0FDF4' : '#FEF2F2', cursor: 'pointer', textAlign: 'left' }}>
+              <span style={{ fontSize: 13.5, color: TINTA }}>{it.nombre} <span style={{ color: '#94a3b8' }}>x{it.cantidad} · {it.deposito}</span></span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: it.disponible ? '#059669' : '#DC2626' }}>{it.disponible ? '✓ Tengo' : '✗ No tengo'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {itemsNuevos.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: '#7C3AED', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 7 }}>Productos nuevos (a comprar)</div>
+          {itemsNuevos.map(it => (
+            <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 13px', borderRadius: 10, border: '1.5px solid #DDD6FE', background: '#F3E8FF', marginBottom: 8 }}>
+              <span style={{ fontSize: 13.5, color: TINTA }}>{it.nombre} <span style={{ color: '#94a3b8' }}>x{it.cantidad} · {it.deposito}</span></span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#7C3AED' }}>🛒 A comprar</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 12, color: '#94a3b8' }}>Al confirmar, se van a agregar al catálogo con cantidad 0 para que puedas darles entrada cuando los compres.</div>
+        </div>
+      )}
+      {faltantes > 0 && <div style={{ background: '#FEF3E2', borderRadius: 9, padding: '9px 13px', marginBottom: 14, fontSize: 12.5, color: '#B45309' }}>{faltantes} ítem(s) de stock marcado(s) como no disponibles. El solicitante lo va a ver antes de confirmar.</div>}
       <Field label="Observaciones (para el solicitante, ej: cuándo llega lo que falta)">
         <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} placeholder="ej: la válvula está en camino, llega en 3 días" style={{ ...inp, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} />
       </Field>
