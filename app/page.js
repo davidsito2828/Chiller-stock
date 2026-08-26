@@ -937,6 +937,7 @@ function Pedidos({ rol, usuario }) {
   const [confirmDel, setConfirmDel] = useState(null);
   const [modalAnular, setModalAnular] = useState(null);
   const [modalDisponibilidad, setModalDisponibilidad] = useState(null);
+  const [sinTelefono, setSinTelefono] = useState(null);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -954,12 +955,32 @@ function Pedidos({ rol, usuario }) {
     setModalAnular(null); cargar();
   };
 
-  const enviarDisponibilidad = async (pedido, itemsConDisponible) => {
+  const enviarDisponibilidad = async (pedido, itemsConDisponible, observaciones) => {
     for (const it of itemsConDisponible) {
       await supabase.from('pedido_items').update({ disponible: it.disponible }).eq('id', it.id);
     }
-    await supabase.from('pedidos').update({ disponibilidad_enviada_por: usuario.nombre, disponibilidad_enviada_en: new Date().toISOString() }).eq('id', pedido.id);
+    await supabase.from('pedidos').update({
+      disponibilidad_enviada_por: usuario.nombre,
+      disponibilidad_enviada_en: new Date().toISOString(),
+      observaciones_disponibilidad: observaciones || null,
+    }).eq('id', pedido.id);
+
+    // Armar y abrir WhatsApp para el solicitante, si tiene teléfono cargado
+    const { data: u } = await supabase.from('usuarios_public').select('telefono').eq('mail', pedido.mail).maybeSingle();
     setModalDisponibilidad(null); cargar();
+    if (u?.telefono) {
+      const disp = itemsConDisponible.filter(i => i.disponible).map(i => `✅ ${i.nombre} x${i.cantidad}`).join('\n');
+      const noDisp = itemsConDisponible.filter(i => !i.disponible).map(i => `❌ ${i.nombre} x${i.cantidad}`).join('\n');
+      let msg = `📦 *Chiller System - Pedido #${pedido.numero}*\nDepósito revisó tu pedido:\n\n`;
+      if (disp) msg += `*Disponible:*\n${disp}\n\n`;
+      if (noDisp) msg += `*No disponible:*\n${noDisp}\n\n`;
+      if (observaciones) msg += `📝 *Observaciones:*\n${observaciones}\n\n`;
+      msg += `Ingresá a la app para confirmar y continuar.`;
+      const tel = u.telefono.replace(/\D/g, '');
+      window.open(`https://wa.me/${tel}?text=${encodeURIComponent(msg)}`, '_blank');
+    } else {
+      setSinTelefono(pedido.solicitante);
+    }
   };
 
   const confirmarContinuar = async (id) => {
@@ -1038,7 +1059,8 @@ function Pedidos({ rol, usuario }) {
             </div>}
 
             {esperandoConfirmacionSolicitante(p) && <div style={{ background: '#E6F1FB', border: '1px solid #BBD9F5', borderRadius: 9, padding: '11px 14px', fontSize: 13, color: '#0C447C' }}>
-              <div style={{ marginBottom: puedeConfirmar(p) ? 10 : 0 }}>📋 Depósito ({p.disponibilidad_enviada_por}) revisó el pedido — mirá arriba qué ítems tiene y cuáles no. {puedeConfirmar(p) ? 'Confirmá para continuar.' : `Esperando confirmación de ${p.solicitante}.`}</div>
+              <div style={{ marginBottom: 6 }}>📋 Depósito ({p.disponibilidad_enviada_por}) revisó el pedido — mirá arriba qué ítems tiene y cuáles no. {puedeConfirmar(p) ? 'Confirmá para continuar.' : `Esperando confirmación de ${p.solicitante}.`}</div>
+              {p.observaciones_disponibilidad && <div style={{ background: '#fff', borderRadius: 7, padding: '8px 11px', marginBottom: 10, fontSize: 12.5, color: '#475569' }}><b>📝 Observación de depósito:</b> {p.observaciones_disponibilidad}</div>}
               {puedeConfirmar(p) && <button onClick={() => confirmarContinuar(p.id)} style={{ ...btnPri, background: '#0284C7' }}><CheckCircle2 size={16} /> Confirmar y continuar</button>}
             </div>}
 
@@ -1053,7 +1075,12 @@ function Pedidos({ rol, usuario }) {
       </ModalShell>}
 
       {modalAnular && <ModalAnularPedido pedido={modalAnular} onClose={() => setModalAnular(null)} onConfirm={(motivo) => anular(modalAnular.id, motivo)} />}
-      {modalDisponibilidad && <ModalDisponibilidad pedido={modalDisponibilidad} onClose={() => setModalDisponibilidad(null)} onConfirm={(items) => enviarDisponibilidad(modalDisponibilidad, items)} />}
+      {modalDisponibilidad && <ModalDisponibilidad pedido={modalDisponibilidad} onClose={() => setModalDisponibilidad(null)} onConfirm={(items, obs) => enviarDisponibilidad(modalDisponibilidad, items, obs)} />}
+      {sinTelefono && <ModalShell onClose={() => setSinTelefono(null)}>
+        <h3 style={{ margin: '0 0 8px', color: '#D97706' }}>Confirmación guardada</h3>
+        <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>Se guardó la disponibilidad, pero <b>{sinTelefono}</b> no tiene un teléfono cargado, así que no se pudo abrir WhatsApp. Se lo podés cargar en el panel de Usuarios, o avisarle por otro medio que confirme en la app.</p>
+        <button onClick={() => setSinTelefono(null)} style={{ ...btnPri, width: '100%' }}>Entendido</button>
+      </ModalShell>}
     </div>
   );
 }
@@ -1072,12 +1099,13 @@ function ModalAnularPedido({ pedido, onClose, onConfirm }) {
 
 function ModalDisponibilidad({ pedido, onClose, onConfirm }) {
   const [items, setItems] = useState((pedido.pedido_items || []).map(it => ({ ...it, disponible: it.disponible !== false })));
+  const [observaciones, setObservaciones] = useState(pedido.observaciones_disponibilidad || '');
   const toggle = (id) => setItems(items.map(it => it.id === id ? { ...it, disponible: !it.disponible } : it));
   const faltantes = items.filter(it => !it.disponible).length;
   return (
     <ModalShell onClose={onClose}>
       <h3 style={{ margin: '0 0 6px', color: AZUL }}>Revisar disponibilidad — Pedido #{pedido.numero}</h3>
-      <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 16px' }}>Marcá qué ítems tenés en depósito. Se le va a avisar a {pedido.solicitante} para que confirme antes de entregar.</p>
+      <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 16px' }}>Marcá qué ítems tenés en depósito. Al confirmar se le va a abrir un WhatsApp a {pedido.solicitante} con el resumen.</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
         {items.map(it => (
           <button key={it.id} onClick={() => toggle(it.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 13px', borderRadius: 10, border: '1.5px solid ' + (it.disponible ? '#A7F3D0' : '#FCA5A5'), background: it.disponible ? '#F0FDF4' : '#FEF2F2', cursor: 'pointer', textAlign: 'left' }}>
@@ -1087,7 +1115,10 @@ function ModalDisponibilidad({ pedido, onClose, onConfirm }) {
         ))}
       </div>
       {faltantes > 0 && <div style={{ background: '#FEF3E2', borderRadius: 9, padding: '9px 13px', marginBottom: 14, fontSize: 12.5, color: '#B45309' }}>{faltantes} ítem(s) marcado(s) como no disponibles. El solicitante lo va a ver antes de confirmar.</div>}
-      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => onConfirm(items)} style={{ ...btnPri, flex: 1 }}><ClipboardList size={16} /> Enviar confirmación</button></div>
+      <Field label="Observaciones (para el solicitante, ej: cuándo llega lo que falta)">
+        <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} placeholder="ej: la válvula está en camino, llega en 3 días" style={{ ...inp, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} />
+      </Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => onConfirm(items, observaciones)} style={{ ...btnPri, flex: 1, background: '#25D366' }}><ClipboardList size={16} /> Confirmar y avisar por WhatsApp</button></div>
     </ModalShell>
   );
 }
@@ -1713,7 +1744,7 @@ function GestionUsuarios({ usuario }) {
 
   const crear = async (u) => {
     const mail = u.mail.trim().toLowerCase();
-    const { error } = await supabase.from('usuarios').insert({ mail, nombre: u.nombre, rol: u.rol });
+    const { error } = await supabase.from('usuarios').insert({ mail, nombre: u.nombre, rol: u.rol, telefono: u.telefono?.trim() || null });
     if (error) { setMsg('No se pudo agregar: ' + (error.message.includes('duplicate') ? 'ese correo ya existe.' : error.message)); return; }
     setModalNuevo(false); setMsg(`✓ ${u.nombre} agregado. Va a crear su propia contraseña la primera vez que entre.`);
     cargar();
@@ -1726,6 +1757,11 @@ function GestionUsuarios({ usuario }) {
 
   const cambiarAccesoTotal = async (mail, valor) => {
     await supabase.from('usuarios').update({ acceso_total: valor }).eq('mail', mail);
+    cargar();
+  };
+
+  const guardarTelefono = async (mail, telefono) => {
+    await supabase.from('usuarios').update({ telefono: telefono || null }).eq('mail', mail);
     cargar();
   };
 
@@ -1749,20 +1785,22 @@ function GestionUsuarios({ usuario }) {
       {msg && <div style={{ background: msg.startsWith('✓') ? '#E7F8EF' : '#FEECEC', color: msg.startsWith('✓') ? '#059669' : '#DC2626', borderRadius: 10, padding: '11px 15px', marginBottom: 14, fontSize: 13.5, fontWeight: 600 }}>{msg}</div>}
 
       <div style={{ background: '#E6F1FB', border: '1px solid #BBD9F5', borderRadius: 11, padding: '12px 16px', marginBottom: 16, fontSize: 13, color: '#0C447C' }}>
-        Al agregar a alguien, no hace falta ponerle contraseña: la crea ella misma la primera vez que entra con su correo.
+        Al agregar a alguien, no hace falta ponerle contraseña: la crea ella misma la primera vez que entra con su correo.<br />
+        Cargá el <b>teléfono con código de país</b> (Argentina: 54 + 9 + código de área sin el 0 + número), ej: <code>5491122334455</code>. Se usa para mandarle WhatsApp cuando depósito confirma un pedido.
       </div>
 
       {loading ? <Cargando /> : (
         <div style={{ background: '#fff', borderRadius: 16, overflow: 'auto', boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 680 }}>
             <thead><tr style={{ background: 'linear-gradient(135deg, #7C3AED, #A78BFA)', color: '#fff', textAlign: 'left' }}>
-              <th style={th}>Nombre</th><th style={th}>Correo</th><th style={th}>Rol</th><th style={{ ...th, textAlign: 'center' }}>Contraseña</th><th style={{ ...th, textAlign: 'center' }}>Acceso total</th><th style={{ ...th, textAlign: 'center', width: 130 }}>Acción</th>
+              <th style={th}>Nombre</th><th style={th}>Correo</th><th style={th}>Teléfono (WhatsApp)</th><th style={th}>Rol</th><th style={{ ...th, textAlign: 'center' }}>Contraseña</th><th style={{ ...th, textAlign: 'center' }}>Acceso total</th><th style={{ ...th, textAlign: 'center', width: 130 }}>Acción</th>
             </tr></thead>
             <tbody>
               {usuarios.map(u => (
                 <tr key={u.mail} style={{ borderBottom: '1px solid #f0f0f0' }}>
                   <td style={td}><b style={{ color: '#222' }}>{u.nombre}</b>{(u.rol === 'dueno' || u.acceso_total) && <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 700, color: '#7C3AED', background: '#F3E8FF', padding: '2px 7px', borderRadius: 8 }}>Acceso total</span>}</td>
                   <td style={{ ...td, color: '#64748b' }}>{u.mail}</td>
+                  <td style={td}><InputTelefono valorInicial={u.telefono} onGuardar={(v) => guardarTelefono(u.mail, v)} /></td>
                   <td style={td}>
                     <select value={u.rol || ''} onChange={e => cambiarRol(u.mail, e.target.value)} style={{ padding: '6px 10px', borderRadius: 8, border: '1.5px solid #e2e8f0', fontSize: 13, background: '#fff', cursor: 'pointer' }}>
                       {ROLES.map(([r, l]) => <option key={r} value={r}>{l}</option>)}
@@ -1810,8 +1848,27 @@ function GestionUsuarios({ usuario }) {
   );
 }
 
+function InputTelefono({ valorInicial, onGuardar }) {
+  const [v, setV] = useState(valorInicial || '');
+  const [guardado, setGuardado] = useState(false);
+  useEffect(() => { setV(valorInicial || ''); }, [valorInicial]);
+  const guardar = () => {
+    if (v === (valorInicial || '')) return;
+    onGuardar(v.trim());
+    setGuardado(true);
+    setTimeout(() => setGuardado(false), 1500);
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <input value={v} onChange={e => setV(e.target.value)} onBlur={guardar} onKeyDown={e => e.key === 'Enter' && e.target.blur()}
+        placeholder="ej: 5491122334455" style={{ padding: '6px 9px', borderRadius: 8, border: '1.5px solid #e2e8f0', fontSize: 13, width: 150 }} />
+      {guardado && <CheckCircle2 size={15} color="#059669" />}
+    </div>
+  );
+}
+
 function ModalNuevoUsuario({ roles, onClose, onConfirm }) {
-  const [f, setF] = useState({ nombre: '', mail: '', rol: 'tecnico' });
+  const [f, setF] = useState({ nombre: '', mail: '', rol: 'tecnico', telefono: '' });
   const set = (k, v) => setF({ ...f, [k]: v });
   const valido = f.nombre.trim() && f.mail.trim().toLowerCase().endsWith('@chillersystem.com');
   return (
@@ -1819,6 +1876,7 @@ function ModalNuevoUsuario({ roles, onClose, onConfirm }) {
       <h3 style={{ margin: '0 0 16px', color: AZUL }}>Agregar usuario</h3>
       <Field label="Nombre completo *"><input value={f.nombre} onChange={e => set('nombre', e.target.value)} placeholder="ej: Juan Pérez" style={inp} /></Field>
       <Field label="Correo *"><input value={f.mail} onChange={e => set('mail', e.target.value)} placeholder="nombre@chillersystem.com" style={inp} /></Field>
+      <Field label="Teléfono (WhatsApp, opcional)"><input value={f.telefono} onChange={e => set('telefono', e.target.value)} placeholder="ej: 5491122334455" style={inp} /></Field>
       <Field label="Rol"><select value={f.rol} onChange={e => set('rol', e.target.value)} style={inp}>{roles.map(([r, l]) => <option key={r} value={r}>{l}</option>)}</select></Field>
       <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '9px 12px', margin: '4px 0 14px', fontSize: 12, color: '#666' }}>No hace falta contraseña: la persona la crea sola al entrar por primera vez.</div>
       <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => valido && onConfirm(f)} disabled={!valido} style={{ ...btnPri, flex: 1, opacity: valido ? 1 : .5 }}>Agregar</button></div>
