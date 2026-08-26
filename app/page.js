@@ -16,12 +16,6 @@ const ROL_LABEL = {
   tecnico: 'Técnico',
   deposito: 'Depósito / Logística',
 };
-// Roles que una persona nueva puede elegirse sola. "Gerente" queda reservado.
-const ROLES_AUTOREGISTRO = [
-  ['supervisor', 'Supervisor', 'Coordina técnicos, aprueba pedidos y consulta stock'],
-  ['tecnico', 'Técnico', 'Trabajo de campo: consulta stock y solicita pedidos'],
-  ['deposito', 'Depósito / Logística', 'Carga stock, entrega y mueve refrigerantes/cañería'],
-];
 
 // Bases con inventario propio y accesos por mail.
 // Norberto (dueño) entra a todas. Para sumar/quitar gente, editá los arrays.
@@ -158,9 +152,7 @@ function Login({ onLogin }) {
     if (err) { setError('No se pudo verificar el correo. Probá de nuevo.'); return; }
     const r = data?.[0];
     if (!r || !r.existe) {
-      const nombreSugerido = m.split('@')[0].replace(/\./g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-      setDatos({ mail: m, nombre: nombreSugerido, rol: null, existe: false });
-      setPaso('nuevo');
+      setPaso('no_existe');
       return;
     }
     if (!r.tiene_password) {
@@ -253,29 +245,16 @@ function Login({ onLogin }) {
           <button onClick={volver} style={{ width: '100%', marginTop: 10, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
         </>}
 
-        {paso === 'nuevo' && <>
-          <p style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 4 }}>Hola <b>{datos.nombre}</b>, sos nuevo por acá</p>
-          <p style={{ fontSize: 13, color: '#888', textAlign: 'center', marginBottom: 14 }}>Elegí tu rol y creá tu contraseña.<br /><span style={{ fontSize: 11.5, color: '#aaa' }}>El rol se elige una sola vez.</span></p>
-          {ROLES_AUTOREGISTRO.map(([r, t, d]) => (
-            <button key={r} onClick={() => setDatos({ ...datos, rolElegido: r })}
-              style={{ width: '100%', textAlign: 'left', padding: '12px 15px', marginBottom: 8, borderRadius: 10, border: '1.5px solid ' + (datos.rolElegido === r ? AZUL : '#e0e0e0'), background: datos.rolElegido === r ? '#EEF2FF' : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 11 }}>
-              <ArrowRight size={16} color={AZUL} />
-              <div><div style={{ fontWeight: 700, fontSize: 14, color: '#222' }}>{t}</div><div style={{ fontSize: 11.5, color: '#999' }}>{d}</div></div>
-            </button>))}
-          <div style={{ background: '#FFF8E1', border: '1px solid #ffe082', borderRadius: 9, padding: '9px 12px', margin: '2px 0 14px', fontSize: 11.5, color: '#7c5800' }}>El rol de <b>Gerente</b> está reservado y no puede autoasignarse.</div>
-          {datos.rolElegido && <>
-            <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Creá tu contraseña</label>
-            <input type="password" value={password} onChange={e => { setPassword(e.target.value); setError(''); }}
-              placeholder="mínimo 4 caracteres" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 10, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
-            <label style={{ fontSize: 13, color: '#555', fontWeight: 600 }}>Repetila</label>
-            <input type="password" value={password2} onChange={e => { setPassword2(e.target.value); setError(''); }} onKeyDown={e => e.key === 'Enter' && crearPassword(datos.rolElegido)}
-              placeholder="repetir" style={{ width: '100%', padding: '12px 14px', marginTop: 6, marginBottom: 4, borderRadius: 9, border: '1.5px solid #ddd', fontSize: 15, boxSizing: 'border-box', outline: 'none' }} />
-            {error && <p style={{ color: '#d32f2f', fontSize: 12.5, margin: '4px 0' }}>{error}</p>}
-            <button onClick={() => crearPassword(datos.rolElegido)} disabled={cargando} style={{ width: '100%', marginTop: 12, padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15.5, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: cargando ? .6 : 1 }}>
-              <LogIn size={18} /> {cargando ? 'Creando cuenta...' : 'Crear cuenta e ingresar'}
-            </button>
-          </>}
-          <button onClick={volver} style={{ width: '100%', marginTop: 10, padding: 9, background: 'none', border: 'none', color: '#999', fontSize: 13, cursor: 'pointer' }}>← Cambiar correo</button>
+        {paso === 'no_existe' && <>
+          <div style={{ textAlign: 'center', marginBottom: 8 }}>
+            <div style={{ width: 56, height: 56, margin: '0 auto 14px', borderRadius: 16, background: '#FEECEC', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Lock size={26} color="#DC2626" /></div>
+          </div>
+          <p style={{ fontSize: 15, fontWeight: 700, color: '#222', textAlign: 'center', marginBottom: 8 }}>Tu cuenta todavía no está creada</p>
+          <p style={{ fontSize: 13.5, color: '#666', textAlign: 'center', marginBottom: 16, lineHeight: 1.5 }}>
+            Por seguridad, ya no cualquiera puede darse de alta solo. Pedile a <b>Depósito</b>, a <b>David</b> o a <b>Norberto</b> que te agregue desde el panel de Usuarios de la app.
+          </p>
+          <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '11px 13px', margin: '0 0 16px', fontSize: 12.5, color: '#666', textAlign: 'center' }}>Correo: <b>{mail.trim().toLowerCase()}</b></div>
+          <button onClick={volver} style={{ width: '100%', padding: 13, background: AZUL, color: '#fff', border: 'none', borderRadius: 9, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>Entendido</button>
         </>}
       </div>
     </div>
