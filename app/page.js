@@ -31,16 +31,17 @@ const BASES = [
   { id: 'TORRE GALICIA', label: 'Torre Galicia', mails: ['ngarcia@chillersystem.com', 'claudiopaz@chillersystem.com', 'matias.e.centurion@chillersystem.com'] },
 ];
 const DUENO_MAIL = 'ngarcia@chillersystem.com';
-// Mails con acceso total a la app, sin importar el rol que tengan asignado.
-// David hace tareas de gerencia aunque su rol visible sea "Supervisor".
-const ADMIN_MAILS = [DUENO_MAIL, 'david.cufre@chillersystem.com'];
+// Acceso total: el rol Gerente siempre lo tiene. Para cualquier otra persona
+// (David, Depósito, o quien sea), se activa/desactiva desde el panel de
+// Usuarios con un interruptor — queda guardado en la base (usuarios.acceso_total),
+// no depende de una lista fija en el código.
 function accesoTotal(usuario) {
-  return ADMIN_MAILS.includes((usuario?.mail || '').toLowerCase());
+  return usuario?.rol === 'dueno' || !!usuario?.accesoTotal;
 }
-// Devuelve las bases a las que puede entrar un mail (accesoTotal entra a todas)
-function basesPermitidas(mail) {
-  const m = (mail || '').toLowerCase();
-  if (ADMIN_MAILS.includes(m)) return BASES;
+// Devuelve las bases a las que puede entrar una persona (acceso total entra a todas)
+function basesPermitidas(usuario) {
+  if (accesoTotal(usuario)) return BASES;
+  const m = (usuario?.mail || '').toLowerCase();
   return BASES.filter(b => b.mails.map(x => x.toLowerCase()).includes(m));
 }
 
@@ -179,7 +180,7 @@ function Login({ onLogin }) {
     if (err) { setError('Error de conexión, probá de nuevo.'); return; }
     const r = data?.[0];
     if (!r?.password_ok) { setError('Contraseña incorrecta.'); return; }
-    onLogin({ mail: datos.mail, nombre: r.nombre, rol: r.rol });
+    onLogin({ mail: datos.mail, nombre: r.nombre, rol: r.rol, accesoTotal: !!r.acceso_total });
   };
 
   // Crea la contraseña por primera vez: sirve tanto para cuentas viejas (migración)
@@ -196,7 +197,7 @@ function Login({ onLogin }) {
     setCargando(false);
     if (err) { setError('No se pudo guardar. Probá de nuevo.'); return; }
     const r = data?.[0];
-    onLogin({ mail: datos.mail, nombre: r.nombre, rol: r.rol });
+    onLogin({ mail: datos.mail, nombre: r.nombre, rol: r.rol, accesoTotal: !!r.acceso_total });
   };
 
   const volver = () => { setPaso('mail'); setPassword(''); setPassword2(''); setError(''); };
@@ -316,7 +317,7 @@ function Sidebar({ vista, setVista, rol, usuario }) {
     { id: 'carrito', label: 'Mi Pedido', icon: ShoppingCart, roles: ['supervisor', 'tecnico'], badge: carrito.length },
     { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
   ];
-  const misBases = basesPermitidas(usuario.mail);
+  const misBases = basesPermitidas(usuario);
   return (
     <aside style={{ width: 232, background: `linear-gradient(180deg, ${AZUL_PROF} 0%, #0A1048 100%)`, padding: '22px 16px', minHeight: 'calc(100vh - 66px)', position: 'relative' }}>
       <div style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: 200, background: `radial-gradient(circle at 80% 0%, rgba(14,165,233,0.18), transparent 60%)`, pointerEvents: 'none' }} />
@@ -1507,7 +1508,7 @@ function FormReparacion({ vehiculo, usuario, onCancel, onGuardadoOk }) {
 // ========================= INVENTARIO DE BASES =========================
 function BaseInventario({ baseId, usuario }) {
   const base = BASES.find(b => b.id === baseId);
-  const permitido = basesPermitidas(usuario.mail).some(b => b.id === baseId);
+  const permitido = basesPermitidas(usuario).some(b => b.id === baseId);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
@@ -1723,6 +1724,11 @@ function GestionUsuarios({ usuario }) {
     cargar();
   };
 
+  const cambiarAccesoTotal = async (mail, valor) => {
+    await supabase.from('usuarios').update({ acceso_total: valor }).eq('mail', mail);
+    cargar();
+  };
+
   const eliminar = async (mail) => {
     await supabase.from('usuarios').delete().eq('mail', mail);
     setConfirmDel(null); cargar();
@@ -1750,12 +1756,12 @@ function GestionUsuarios({ usuario }) {
         <div style={{ background: '#fff', borderRadius: 16, overflow: 'auto', boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 680 }}>
             <thead><tr style={{ background: 'linear-gradient(135deg, #7C3AED, #A78BFA)', color: '#fff', textAlign: 'left' }}>
-              <th style={th}>Nombre</th><th style={th}>Correo</th><th style={th}>Rol</th><th style={{ ...th, textAlign: 'center' }}>Contraseña</th><th style={{ ...th, textAlign: 'center', width: 130 }}>Acción</th>
+              <th style={th}>Nombre</th><th style={th}>Correo</th><th style={th}>Rol</th><th style={{ ...th, textAlign: 'center' }}>Contraseña</th><th style={{ ...th, textAlign: 'center' }}>Acceso total</th><th style={{ ...th, textAlign: 'center', width: 130 }}>Acción</th>
             </tr></thead>
             <tbody>
               {usuarios.map(u => (
                 <tr key={u.mail} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                  <td style={td}><b style={{ color: '#222' }}>{u.nombre}</b>{ADMIN_MAILS.includes(u.mail.toLowerCase()) && <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 700, color: '#7C3AED', background: '#F3E8FF', padding: '2px 7px', borderRadius: 8 }}>Acceso total</span>}</td>
+                  <td style={td}><b style={{ color: '#222' }}>{u.nombre}</b>{(u.rol === 'dueno' || u.acceso_total) && <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 700, color: '#7C3AED', background: '#F3E8FF', padding: '2px 7px', borderRadius: 8 }}>Acceso total</span>}</td>
                   <td style={{ ...td, color: '#64748b' }}>{u.mail}</td>
                   <td style={td}>
                     <select value={u.rol || ''} onChange={e => cambiarRol(u.mail, e.target.value)} style={{ padding: '6px 10px', borderRadius: 8, border: '1.5px solid #e2e8f0', fontSize: 13, background: '#fff', cursor: 'pointer' }}>
@@ -1766,6 +1772,14 @@ function GestionUsuarios({ usuario }) {
                     {u.tiene_password
                       ? <span style={{ background: '#E7F8EF', color: '#059669', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20 }}>Configurada</span>
                       : <span style={{ background: '#FEF3E2', color: '#D97706', fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20 }}>Sin definir</span>}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    {u.rol === 'dueno'
+                      ? <span style={{ fontSize: 11.5, color: '#94a3b8' }}>Siempre (Gerente)</span>
+                      : <button onClick={() => cambiarAccesoTotal(u.mail, !u.acceso_total)} title="Activar/desactivar acceso total"
+                          style={{ width: 42, height: 24, borderRadius: 20, border: 'none', cursor: 'pointer', background: u.acceso_total ? '#7C3AED' : '#e2e8f0', position: 'relative', transition: 'background .15s' }}>
+                          <span style={{ position: 'absolute', top: 2, left: u.acceso_total ? 20 : 2, width: 20, height: 20, borderRadius: '50%', background: '#fff', transition: 'left .15s', boxShadow: '0 1px 3px rgba(0,0,0,.3)' }} />
+                        </button>}
                   </td>
                   <td style={{ ...td, textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
