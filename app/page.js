@@ -449,8 +449,12 @@ function Stock({ rol, usuario }) {
   const [modalNuevo, setModalNuevo] = useState(false);
   const [modalEditar, setModalEditar] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
+  const [solicitudTexto, setSolicitudTexto] = useState('');
+  const [enviandoSolicitud, setEnviandoSolicitud] = useState(false);
+  const [solicitudes, setSolicitudes] = useState([]);
   const carrito = useCarrito();
   const esDeposito = rol === 'deposito' || accesoTotal(usuario);
+  const puedeSolicitar = rol === 'supervisor' || rol === 'tecnico';
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -459,6 +463,35 @@ function Stock({ rol, usuario }) {
     setLoading(false);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
+
+  const cargarSolicitudes = useCallback(async () => {
+    const { data } = await supabase.from('solicitudes_producto').select('*').order('creado_en', { ascending: false });
+    setSolicitudes(data || []);
+  }, []);
+  useEffect(() => { cargarSolicitudes(); }, [cargarSolicitudes]);
+
+  const enviarSolicitud = async () => {
+    const nombre = solicitudTexto.trim();
+    if (!nombre) return;
+    setEnviandoSolicitud(true);
+    await supabase.from('solicitudes_producto').insert({ nombre_solicitado: nombre, solicitado_por: usuario.nombre, mail: usuario.mail });
+    setSolicitudTexto(''); setEnviandoSolicitud(false);
+    cargarSolicitudes();
+  };
+
+  const guardarSolicitudEnCatalogo = async (sol, nombreFinal, depositoDestino) => {
+    const { data: nuevo } = await supabase.from('productos').insert({ nombre: nombreFinal, categoria: 'General', deposito: depositoDestino, cantidad: 0 }).select().single();
+    await supabase.from('solicitudes_producto').update({ estado: 'guardado', nombre_final: nombreFinal, deposito: depositoDestino, producto_id: nuevo?.id, revisado_por: usuario.nombre, revisado_en: new Date().toISOString() }).eq('id', sol.id);
+    cargarSolicitudes(); cargar();
+  };
+
+  const descartarSolicitud = async (id) => {
+    await supabase.from('solicitudes_producto').update({ estado: 'descartado', revisado_por: usuario.nombre, revisado_en: new Date().toISOString() }).eq('id', id);
+    cargarSolicitudes();
+  };
+
+  const misSolicitudes = solicitudes.filter(s => s.mail === usuario.mail);
+  const solicitudesPendientes = solicitudes.filter(s => s.estado === 'pendiente');
 
   // Rubros fijos + los que ya existan en la base
   const RUBROS = ['Herramientas', 'Insumos', 'Materiales', 'Repuestos'];
@@ -517,6 +550,38 @@ function Stock({ rol, usuario }) {
         <Select value={dep} onChange={setDep} options={['Todos', 'Caseros', 'Mataderos']} />
         <Select value={cat} onChange={setCat} options={categorias} />
       </div>
+
+      {puedeSolicitar && (
+        <div style={{ background: '#fff', borderRadius: 13, padding: 14, marginBottom: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: TINTA, marginBottom: 8 }}>¿No encontrás el producto? Solicitalo</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <input value={solicitudTexto} onChange={e => setSolicitudTexto(e.target.value)} onKeyDown={e => e.key === 'Enter' && enviarSolicitud()}
+              placeholder="ej: sensor de presión para equipo Carrier 3TR" style={{ ...inp, flex: 1, minWidth: 220 }} />
+            <button onClick={enviarSolicitud} disabled={enviandoSolicitud || !solicitudTexto.trim()} style={{ ...btnPri, opacity: (!solicitudTexto.trim() || enviandoSolicitud) ? .5 : 1 }}><Plus size={16} /> Solicitar</button>
+          </div>
+          {misSolicitudes.length > 0 && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #f1f5f9' }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 7 }}>Tus solicitudes</div>
+              {misSolicitudes.slice(0, 6).map(s => (
+                <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: '#F8FAFC', borderRadius: 8, marginBottom: 5, fontSize: 13 }}>
+                  <span>{s.nombre_solicitado}{s.nombre_final && s.nombre_final !== s.nombre_solicitado && <span style={{ color: '#94a3b8' }}> → {s.nombre_final}</span>}</span>
+                  <EstadoSolicitudBadge estado={s.estado} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {esDeposito && solicitudesPendientes.length > 0 && (
+        <div style={{ background: '#FFF8E1', border: '1px solid #ffe082', borderRadius: 13, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#7c5800', marginBottom: 12 }}>📋 {solicitudesPendientes.length} solicitud{solicitudesPendientes.length > 1 ? 'es' : ''} de producto{solicitudesPendientes.length > 1 ? 's' : ''} nuevo{solicitudesPendientes.length > 1 ? 's' : ''} para revisar</div>
+          {solicitudesPendientes.map(s => (
+            <FilaSolicitudPendiente key={s.id} sol={s} onGuardar={guardarSolicitudEnCatalogo} onDescartar={descartarSolicitud} />
+          ))}
+        </div>
+      )}
+
       {loading ? <Cargando /> : (
         <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 760 }}>
@@ -563,6 +628,31 @@ function RubroBadge({ rubro }) {
   const colores = { Herramientas: '#8B5CF6', Insumos: '#0EA5E9', Materiales: '#F59E0B', Repuestos: '#10B981' };
   const col = colores[rubro] || '#64748b';
   return <span style={{ background: col + '18', color: col, fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 6 }}>{rubro || 'General'}</span>;
+}
+function EstadoSolicitudBadge({ estado }) {
+  const map = { pendiente: ['#FEF3E2', '#D97706', 'Pendiente'], guardado: ['#E7F8EF', '#059669', 'Agregado al catálogo'], descartado: ['#F1F5F9', '#64748B', 'Descartado'] };
+  const [bg, col, txt] = map[estado] || map.pendiente;
+  return <span style={{ background: bg, color: col, fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap' }}>{txt}</span>;
+}
+function FilaSolicitudPendiente({ sol, onGuardar, onDescartar }) {
+  const [nombre, setNombre] = useState(sol.nombre_solicitado);
+  const [deposito, setDeposito] = useState('Caseros');
+  const [guardando, setGuardando] = useState(false);
+  const guardar = async () => {
+    if (!nombre.trim()) return;
+    setGuardando(true);
+    await onGuardar(sol, nombre.trim(), deposito);
+    setGuardando(false);
+  };
+  return (
+    <div style={{ background: '#fff', borderRadius: 10, padding: 12, marginBottom: 9, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+      <input value={nombre} onChange={e => setNombre(e.target.value)} style={{ ...inp, flex: 2, minWidth: 200 }} />
+      <select value={deposito} onChange={e => setDeposito(e.target.value)} style={{ ...inp, flex: '0 0 130px' }}><option>Caseros</option><option>Mataderos</option></select>
+      <div style={{ fontSize: 11.5, color: '#94a3b8', flex: '0 0 100%' }}>Pidió: {sol.solicitado_por} · {new Date(sol.creado_en).toLocaleDateString('es-AR')}{nombre !== sol.nombre_solicitado && <span> · original: "{sol.nombre_solicitado}"</span>}</div>
+      <button onClick={guardar} disabled={guardando} style={{ ...btnPri, background: '#059669', padding: '9px 14px', opacity: guardando ? .6 : 1 }}><CheckCircle2 size={15} /> Guardar en catálogo</button>
+      <button onClick={() => onDescartar(sol.id)} style={{ ...btnSec, padding: '9px 14px' }}><XCircle size={15} /> Descartar</button>
+    </div>
+  );
 }
 function ModalNuevoProducto({ rubros, onClose, onConfirm, editar, producto }) {
   const [f, setF] = useState(editar && producto
