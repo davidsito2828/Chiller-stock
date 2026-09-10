@@ -1,0 +1,15 @@
+# dependencias
+/node_modules
+
+# build de Next.js
+/.next
+/out
+
+# variables de entorno (las claves de Supabase van en Vercel, no en el repo)
+.env
+.env*.local
+
+# logs y sistema
+npm-debug.log*
+*.log
+.DS_Store

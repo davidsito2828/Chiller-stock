@@ -431,6 +431,10 @@ function Stock({ rol, usuario }) {
   const [solicitudTexto, setSolicitudTexto] = useState('');
   const [solicitudDeposito, setSolicitudDeposito] = useState('Caseros');
   const [agregado, setAgregado] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [previewExcel, setPreviewExcel] = useState(null);
+  const [msgExcel, setMsgExcel] = useState('');
+  const fileRef = React.useRef(null);
   const carrito = useCarrito();
   const esDeposito = rol === 'deposito' || accesoTotal(usuario);
   const puedeSolicitar = rol === 'supervisor' || rol === 'tecnico';
@@ -499,9 +503,124 @@ function Stock({ rol, usuario }) {
     cargar();
   };
 
+  // ---- Actualizar inventario por Excel (solo depósito) ----
+  // Usa el MISMO mapeo flexible de columnas que el importador de Bases
+  // (funciones norm / pick). Acá el depósito de cada fila es obligatorio.
+  const leerExcel = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportando(true); setMsgExcel('');
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      if (rows.length === 0) { setMsgExcel('El Excel está vacío.'); setImportando(false); if (fileRef.current) fileRef.current.value = ''; return; }
+
+      const norm = (k) => String(k).toLowerCase().trim();
+      const pick = (row, ...alts) => {
+        for (const key of Object.keys(row)) {
+          if (alts.some(a => norm(key) === a || norm(key).includes(a))) return row[key];
+        }
+        return '';
+      };
+      const normDeposito = (v) => {
+        const t = norm(v);
+        if (t.includes('caseros')) return 'Caseros';
+        if (t.includes('mataderos')) return 'Mataderos';
+        return null;
+      };
+
+      const validos = [];
+      const sinNombre = [];    // números de fila del Excel
+      const depInvalido = [];  // { nombre, deposito }
+      rows.forEach((r, idx) => {
+        const filaExcel = idx + 2; // +1 encabezado, +1 porque idx arranca en 0
+        const nombre = String(pick(r, 'nombre', 'producto', 'articulo', 'detalle') || '').trim();
+        const depCrudo = pick(r, 'deposito', 'depósito', 'sucursal', 'ubicacion');
+        const deposito = normDeposito(depCrudo);
+        if (!nombre) { sinNombre.push(filaExcel); return; }
+        if (!deposito) { depInvalido.push({ nombre, deposito: String(depCrudo || '').trim() || '(vacío)' }); return; }
+        validos.push({
+          nombre,
+          marca: String(pick(r, 'marca') || '').trim(),
+          modelo: String(pick(r, 'modelo') || '').trim(),
+          descripcion: String(pick(r, 'descripcion', 'detalle', 'observacion') || '').trim(),
+          codigo: String(pick(r, 'codigo', 'cod', 'sku') || '').trim(),
+          categoria: String(pick(r, 'categoria', 'rubro') || 'General').trim() || 'General',
+          deposito,
+          cantidad: parseInt(pick(r, 'cantidad', 'cant', 'stock')) || 0,
+        });
+      });
+
+      // Sumar cantidades de filas repetidas (mismo nombre + depósito)
+      const mapa = new Map();
+      for (const p of validos) {
+        const clave = p.nombre.toLowerCase() + '||' + p.deposito;
+        if (mapa.has(clave)) mapa.get(clave).cantidad += p.cantidad;
+        else mapa.set(clave, { ...p });
+      }
+      const finales = Array.from(mapa.values());
+
+      if (finales.length === 0) {
+        setMsgExcel('No se pudo leer ningún producto válido. El Excel tiene que tener una columna "nombre" (o "producto") y una columna "depósito" con el valor Caseros o Mataderos en cada fila.');
+        setImportando(false); if (fileRef.current) fileRef.current.value = ''; return;
+      }
+
+      const porDep = (d) => finales.filter(p => p.deposito === d);
+      setPreviewExcel({
+        finales,
+        caseros: porDep('Caseros').length,
+        mataderos: porDep('Mataderos').length,
+        unidadesCaseros: porDep('Caseros').reduce((a, b) => a + b.cantidad, 0),
+        unidadesMataderos: porDep('Mataderos').reduce((a, b) => a + b.cantidad, 0),
+        duplicadosSumados: validos.length - finales.length,
+        sinNombre,
+        depInvalido,
+        totalActual: stock.length,
+      });
+    } catch (err) {
+      setMsgExcel('Error al leer el Excel: ' + err.message);
+    }
+    setImportando(false);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const confirmarReemplazo = async () => {
+    if (!previewExcel) return;
+    setImportando(true);
+    const { data, error } = await supabase.rpc('reemplazar_stock_general', { p_productos: previewExcel.finales });
+    setImportando(false);
+    if (error) {
+      setMsgExcel('No se pudo actualizar el inventario: ' + error.message + '. El stock anterior quedó intacto.');
+      setPreviewExcel(null);
+      return;
+    }
+    const cargados = typeof data === 'number' ? data : previewExcel.finales.length;
+    setPreviewExcel(null);
+    setMsgExcel(`✓ Inventario actualizado: ${cargados} producto(s) cargados. Se reemplazó todo el Stock General anterior.`);
+    cargar();
+  };
+
   return (
     <div>
-      <SectionTitle icon={Boxes} title="Stock General" sub={`${stock.length} ítems · Caseros + Mataderos`} accion={esDeposito ? <button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar producto</button> : <BotonRefrescar onClick={cargar} />} />
+      <SectionTitle icon={Boxes} title="Stock General" sub={`${stock.length} ítems · Caseros + Mataderos`} accion={esDeposito ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => fileRef.current?.click()} disabled={importando} style={{ ...btnSec, padding: '8px 14px', opacity: importando ? .6 : 1 }}><Upload size={15} /> {importando ? 'Leyendo...' : 'Actualizar inventario (Excel)'}</button>
+          <button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar producto</button>
+          <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={leerExcel} style={{ display: 'none' }} />
+        </div>
+      ) : <BotonRefrescar onClick={cargar} />} />
+
+      {msgExcel && <div style={{ background: msgExcel.startsWith('✓') ? '#E7F8EF' : '#FEECEC', color: msgExcel.startsWith('✓') ? '#059669' : '#DC2626', borderRadius: 10, padding: '11px 15px', marginBottom: 14, fontSize: 13.5, fontWeight: 600 }}>{msgExcel}</div>}
+
+      {esDeposito && (
+        <div style={{ background: '#E6F1FB', border: '1px solid #BBD9F5', borderRadius: 11, padding: '11px 15px', marginBottom: 14, fontSize: 12.5, color: '#0C447C' }}>
+          <b>Actualizar inventario por Excel:</b> la primera hoja tiene que tener las columnas <i>nombre</i> (o <i>producto</i>) y <i>depósito</i> con el valor <i>Caseros</i> o <i>Mataderos</i> en cada fila. Opcionales: marca, modelo, código, rubro, cantidad. Vas a poder revisar todo antes de confirmar — <b>reemplaza el Stock General completo</b>.
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
           <Search size={17} color="#999" style={{ position: 'absolute', left: 12, top: 11 }} />
@@ -563,6 +682,47 @@ function Stock({ rol, usuario }) {
         <h3 style={{ margin: '0 0 8px', color: '#DC2626' }}>Eliminar producto</h3>
         <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>¿Seguro que querés eliminar <b>{confirmDel.nombre}</b> ({confirmDel.deposito})? Esta acción no se puede deshacer.</p>
         <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminarProducto(confirmDel.id)} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Eliminar</button></div>
+      </ModalShell>}
+      {previewExcel && <ModalShell onClose={() => !importando && setPreviewExcel(null)}>
+        <h3 style={{ margin: '0 0 6px', color: AZUL, display: 'flex', alignItems: 'center', gap: 8 }}><Upload size={20} /> Revisar antes de actualizar</h3>
+        <p style={{ fontSize: 13.5, color: '#475569', margin: '0 0 16px' }}>Se leyeron <b>{previewExcel.finales.length} producto(s)</b> del Excel.</p>
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1, background: '#EEF2FF', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: AZUL }}>{previewExcel.caseros}</div>
+            <div style={{ fontSize: 12, color: '#64748b' }}>a Caseros · {previewExcel.unidadesCaseros} u.</div>
+          </div>
+          <div style={{ flex: 1, background: '#ECFDF5', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: '#0D9488' }}>{previewExcel.mataderos}</div>
+            <div style={{ fontSize: 12, color: '#64748b' }}>a Mataderos · {previewExcel.unidadesMataderos} u.</div>
+          </div>
+        </div>
+
+        {previewExcel.duplicadosSumados > 0 && <div style={{ background: '#F4F6FB', borderRadius: 9, padding: '9px 12px', marginBottom: 12, fontSize: 12.5, color: '#475569' }}>Se juntaron <b>{previewExcel.duplicadosSumados}</b> fila(s) repetida(s) (mismo producto y depósito): se sumaron sus cantidades.</div>}
+
+        {(previewExcel.sinNombre.length > 0 || previewExcel.depInvalido.length > 0) && (
+          <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 9, padding: '10px 12px', marginBottom: 12, fontSize: 12.5, color: '#92400E' }}>
+            <div style={{ fontWeight: 700, marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}><AlertTriangle size={14} /> Filas que NO se van a cargar</div>
+            {previewExcel.sinNombre.length > 0 && <div style={{ marginBottom: 4 }}>{previewExcel.sinNombre.length} fila(s) sin nombre de producto (fila {previewExcel.sinNombre.slice(0, 12).join(', ')}{previewExcel.sinNombre.length > 12 ? '…' : ''} del Excel).</div>}
+            {previewExcel.depInvalido.length > 0 && <div>
+              {previewExcel.depInvalido.length} fila(s) con depósito distinto de Caseros/Mataderos:
+              <div style={{ maxHeight: 96, overflow: 'auto', marginTop: 4, paddingLeft: 4 }}>
+                {previewExcel.depInvalido.slice(0, 25).map((d, i) => <div key={i}>· {d.nombre} → "{d.deposito}"</div>)}
+                {previewExcel.depInvalido.length > 25 && <div>… y {previewExcel.depInvalido.length - 25} más</div>}
+              </div>
+            </div>}
+          </div>
+        )}
+
+        <div style={{ background: '#FEECEC', border: '1px solid #F7C1C1', borderRadius: 9, padding: '11px 13px', marginBottom: 16, fontSize: 13, color: '#B91C1C' }}>
+          <div style={{ fontWeight: 700, marginBottom: 3, display: 'flex', alignItems: 'center', gap: 6 }}><AlertTriangle size={15} /> Esto reemplaza TODO el Stock General</div>
+          Hoy hay <b>{previewExcel.totalActual} producto(s)</b> cargados. Se borran todos y quedan los <b>{previewExcel.finales.length}</b> del Excel. No se puede deshacer.
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={() => setPreviewExcel(null)} disabled={importando} style={{ ...btnSec, flex: 1 }}>Cancelar</button>
+          <button onClick={confirmarReemplazo} disabled={importando} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><RefreshCw size={16} /> {importando ? 'Actualizando...' : 'Sí, reemplazar todo'}</button>
+        </div>
       </ModalShell>}
     </div>
   );
