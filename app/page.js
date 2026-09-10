@@ -554,10 +554,19 @@ function Stock({ rol, usuario }) {
         });
       });
 
-      // Sumar cantidades de filas repetidas (mismo nombre + depósito)
+      // Sumar cantidades SOLO de filas que son realmente el mismo producto.
+      // Muchos ítems comparten un nombre genérico ("Oring", "Correa lisa",
+      // "Contactor trifásico") pero son repuestos distintos. Cuando no tienen
+      // código cargado, lo único que los diferencia es el modelo, la marca o la
+      // descripción (ej: "Contactor trifásico" de distinta marca y amperaje).
+      // Por eso la clave incluye los seis campos: dos filas se fusionan y se
+      // suman las cantidades solo si nombre + depósito + código + modelo +
+      // marca + descripción coinciden exactamente (todo normalizado). Si falta
+      // info y dos filas quedan idénticas en todo lo cargado, es correcto que se
+      // fusionen.
       const mapa = new Map();
       for (const p of validos) {
-        const clave = p.nombre.toLowerCase() + '||' + p.deposito;
+        const clave = [norm(p.nombre), p.deposito, norm(p.codigo), norm(p.modelo), norm(p.marca), norm(p.descripcion)].join('||');
         if (mapa.has(clave)) mapa.get(clave).cantidad += p.cantidad;
         else mapa.set(clave, { ...p });
       }
