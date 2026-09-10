@@ -1374,7 +1374,10 @@ function Vehiculos({ rol, usuario }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [detalle, setDetalle] = useState(null);
+  const [seccion, setSeccion] = useState('vehiculos');  // 'vehiculos' | 'registros'
   const puedeEditar = rol === 'deposito' || rol === 'dueno' || accesoTotal(usuario);
+  // La planilla de Registros la ven supervisor, depósito y gerencia (no técnico).
+  const puedeVerRegistros = rol === 'supervisor' || rol === 'deposito' || rol === 'dueno' || accesoTotal(usuario);
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -1430,7 +1433,17 @@ function Vehiculos({ rol, usuario }) {
 
   return (
     <div>
-      <SectionTitle icon={Truck} title="Vehículos" sub="Uso diario, kilometraje, services y novedades" accion={puedeEditar ? <button onClick={() => setModal({ tipo: 'nuevo' })} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar vehículo</button> : <BotonRefrescar onClick={cargar} />} />
+      <SectionTitle icon={Truck} title="Vehículos" sub="Uso diario, kilometraje, services y novedades" accion={puedeEditar && seccion === 'vehiculos' ? <button onClick={() => setModal({ tipo: 'nuevo' })} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar vehículo</button> : <BotonRefrescar onClick={cargar} />} />
+
+      {puedeVerRegistros && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1.5px solid #f1f5f9' }}>
+          {[['vehiculos', 'Vehículos'], ['registros', 'Registros']].map(([id, label]) => (
+            <button key={id} onClick={() => setSeccion(id)} style={{ padding: '9px 16px', border: 'none', borderBottom: '2.5px solid ' + (seccion === id ? AZUL : 'transparent'), background: 'none', color: seccion === id ? AZUL : '#94a3b8', fontWeight: 700, fontSize: 13.5, cursor: 'pointer', fontFamily: "'Sora', sans-serif" }}>{label}</button>
+          ))}
+        </div>
+      )}
+
+      {seccion === 'registros' && puedeVerRegistros ? <RegistrosVehiculos vehiculos={vehiculos} /> : <>
 
       {(vencidos > 0 || proximos > 0 || conProblemas > 0) && (
         <div style={{ display: 'flex', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
@@ -1483,6 +1496,7 @@ function Vehiculos({ rol, usuario }) {
           })}
         </div>
       )}
+      </>}
 
       {modal?.tipo === 'nuevo' && <ModalVehiculo onClose={() => setModal(null)} onConfirm={crear} />}
       {modal?.tipo === 'editar' && <ModalVehiculo vehiculo={modal.vehiculo} onClose={() => setModal(null)} onConfirm={(v) => editar(modal.vehiculo.id, v)} onEliminar={() => eliminar(modal.vehiculo.id)} />}
@@ -1490,6 +1504,155 @@ function Vehiculos({ rol, usuario }) {
       {modal?.tipo === 'devolver' && <ModalDevolver vehiculo={modal.vehiculo} uso={modal.uso} onClose={() => setModal(null)} onConfirm={devolver} />}
       {modal?.tipo === 'novedad' && <ModalNovedad vehiculo={modal.vehiculo} usuario={usuario} onClose={() => setModal(null)} onGuardadoOk={() => { setModal(null); cargar(); }} />}
       {detalle && <ModalHistorialVehiculo vehiculo={detalle} puedeEditar={puedeEditar} usuario={usuario} onClose={() => setDetalle(null)} onActualizar={cargar} />}
+    </div>
+  );
+}
+
+// yyyy-mm-dd en hora local (para inputs <input type="date"> y comparar rangos).
+const fechaISOLocal = (d) => {
+  const x = d instanceof Date ? d : new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+};
+
+// Selector de rango de fechas reutilizable: dos inputs date + atajos rápidos.
+// onChange siempre recibe { desde, hasta } como 'yyyy-mm-dd' ('' = sin límite).
+function SelectorRangoFechas({ desde, hasta, onChange }) {
+  const atajo = (tipo) => {
+    const hoy = new Date();
+    let ini;
+    if (tipo === 'semana') {
+      ini = new Date(hoy);
+      ini.setDate(ini.getDate() - ((ini.getDay() + 6) % 7)); // arranca el lunes
+    } else if (tipo === 'mes') {
+      ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    } else {
+      ini = new Date(hoy.getFullYear(), 0, 1);
+    }
+    onChange({ desde: fechaISOLocal(ini), hasta: fechaISOLocal(hoy) });
+  };
+  const chip = { padding: '7px 12px', borderRadius: 20, border: '1.5px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <input type="date" value={desde} max={hasta || undefined} onChange={e => onChange({ desde: e.target.value, hasta })} style={{ ...inp, width: 'auto' }} />
+      <span style={{ color: '#94a3b8', fontSize: 13 }}>a</span>
+      <input type="date" value={hasta} min={desde || undefined} onChange={e => onChange({ desde, hasta: e.target.value })} style={{ ...inp, width: 'auto' }} />
+      <button onClick={() => atajo('semana')} style={chip}>Esta semana</button>
+      <button onClick={() => atajo('mes')} style={chip}>Este mes</button>
+      <button onClick={() => atajo('anio')} style={chip}>Este año</button>
+      {(desde || hasta) && <button onClick={() => onChange({ desde: '', hasta: '' })} style={{ ...chip, border: 'none', color: '#94a3b8' }}>Limpiar</button>}
+    </div>
+  );
+}
+
+// Pestaña "Registros" de Vehículos: planilla combinada de TODOS los usos y
+// novedades de TODOS los vehículos. Solo lectura — no toca esas tablas.
+function RegistrosVehiculos({ vehiculos }) {
+  const [usos, setUsos] = useState([]);
+  const [novedades, setNovedades] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fVehiculo, setFVehiculo] = useState('Todos');
+  const [fPersona, setFPersona] = useState('');
+  const [fTipo, setFTipo] = useState('Todos');
+  const [rango, setRango] = useState({ desde: '', hasta: '' });
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const [us, nov] = await Promise.all([
+      supabase.from('usos_vehiculo').select('*').order('tomado_en', { ascending: false }),
+      supabase.from('novedades_vehiculo').select('*').order('reportado_en', { ascending: false }),
+    ]);
+    setUsos(us.data || []);
+    setNovedades(nov.data || []);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const patente = useCallback((id) => {
+    const v = vehiculos.find(x => x.id === id);
+    return v ? v.patente : '—';
+  }, [vehiculos]);
+
+  const fmtH = (d) => d ? new Date(d).toLocaleString('es-AR') : '—';
+
+  // Unificar usos + novedades en filas con la misma forma
+  const filas = useMemo(() => {
+    const deUsos = usos.map(u => ({
+      key: 'u' + u.id,
+      fecha: u.tomado_en,
+      vehiculoId: u.vehiculo_id,
+      tipo: 'Uso',
+      persona: u.usuario || '—',
+      detalle: `Tomó con ${(u.km_inicio || 0).toLocaleString('es-AR')} km`
+        + (u.estado === 'cerrado'
+          ? `; devolvió con ${(u.km_fin || 0).toLocaleString('es-AR')} km (recorrió ${Math.max(0, (u.km_fin || 0) - (u.km_inicio || 0)).toLocaleString('es-AR')} km)`
+          : ' · todavía en uso')
+        + (u.nota ? ` — ${u.nota}` : ''),
+    }));
+    const deNov = novedades.map(n => ({
+      key: 'n' + n.id,
+      fecha: n.reportado_en,
+      vehiculoId: n.vehiculo_id,
+      tipo: 'Novedad',
+      persona: n.reportado_por || '—',
+      detalle: (n.tipo === 'problema' ? '⚠️ Problema' : '📝 Nota')
+        + (n.descripcion ? `: ${n.descripcion}` : '')
+        + (n.tipo === 'problema'
+          ? (n.estado === 'resuelto' ? ` (resuelto${n.resuelto_por ? ' por ' + n.resuelto_por : ''})` : ' (sin resolver)')
+          : ''),
+    }));
+    return [...deUsos, ...deNov].sort((a, b) => new Date(b.fecha || 0) - new Date(a.fecha || 0));
+  }, [usos, novedades]);
+
+  const personas = useMemo(
+    () => Array.from(new Set(filas.map(f => f.persona).filter(p => p && p !== '—'))).sort(),
+    [filas],
+  );
+
+  const filtradas = filas.filter(f => {
+    if (fVehiculo !== 'Todos' && patente(f.vehiculoId) !== fVehiculo) return false;
+    if (fTipo !== 'Todos' && f.tipo !== fTipo) return false;
+    if (fPersona.trim() && !f.persona.toLowerCase().includes(fPersona.trim().toLowerCase())) return false;
+    const dia = f.fecha ? fechaISOLocal(f.fecha) : '';
+    if (rango.desde && (!dia || dia < rango.desde)) return false;
+    if (rango.hasta && (!dia || dia > rango.hasta)) return false;
+    return true;
+  });
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <Select value={fVehiculo} onChange={setFVehiculo} options={['Todos', ...vehiculos.map(v => v.patente)]} />
+        <Select value={fTipo} onChange={setFTipo} options={['Todos', 'Uso', 'Novedad']} />
+        <input value={fPersona} onChange={e => setFPersona(e.target.value)} list="registros-personas" placeholder="Filtrar por persona..."
+          style={{ ...inp, width: 'auto', minWidth: 210, flex: '0 1 260px' }} />
+        <datalist id="registros-personas">{personas.map(p => <option key={p} value={p} />)}</datalist>
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <SelectorRangoFechas desde={rango.desde} hasta={rango.hasta} onChange={setRango} />
+      </div>
+
+      {loading ? <Cargando /> : (
+        <div style={{ background: '#fff', borderRadius: 16, overflow: 'auto', boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 860 }}>
+            <thead><tr style={{ background: `linear-gradient(135deg, ${AZUL}, #2937FF)`, color: '#fff', textAlign: 'left' }}>
+              <th style={th}>Fecha</th><th style={th}>Vehículo</th><th style={th}>Tipo</th><th style={th}>Responsable</th><th style={th}>Detalle</th>
+            </tr></thead>
+            <tbody>
+              {filtradas.map(f => (
+                <tr key={f.key} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ ...td, whiteSpace: 'nowrap', color: '#475569' }}>{fmtH(f.fecha)}</td>
+                  <td style={{ ...td, fontWeight: 700, color: TINTA, whiteSpace: 'nowrap' }}>{patente(f.vehiculoId)}</td>
+                  <td style={td}><span style={{ background: f.tipo === 'Uso' ? '#E6F1FB' : '#FEF3E2', color: f.tipo === 'Uso' ? '#0C447C' : '#D97706', fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 20 }}>{f.tipo}</span></td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{f.persona}</td>
+                  <td style={{ ...td, color: '#475569' }}>{f.detalle}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtradas.length === 0 && <Empty texto={filas.length === 0 ? 'Todavía no hay usos ni novedades registrados' : 'No hay registros con esos filtros'} />}
+        </div>
+      )}
+      {!loading && filtradas.length > 0 && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>{filtradas.length} registro{filtradas.length > 1 ? 's' : ''}</div>}
     </div>
   );
 }
