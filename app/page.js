@@ -1115,6 +1115,7 @@ function Pedidos({ rol, usuario }) {
   const [confirmDel, setConfirmDel] = useState(null);
   const [modalAnular, setModalAnular] = useState(null);
   const [modalDisponibilidad, setModalDisponibilidad] = useState(null);
+  const [modalRecibido, setModalRecibido] = useState(null);
   const [sinTelefono, setSinTelefono] = useState(null);
 
   const cargar = useCallback(async () => {
@@ -1172,6 +1173,17 @@ function Pedidos({ rol, usuario }) {
     }
   };
 
+  // Paso extra DESPUÉS de "entregado": el solicitante confirma que el pedido le
+  // llegó. No cambia p.estado (sigue 'entregado'), solo agrega info de recepción.
+  const marcarRecibido = async (id, observacion) => {
+    await supabase.from('pedidos').update({
+      recibido_por: usuario.nombre,
+      recibido_en: new Date().toISOString(),
+      recibido_observacion: observacion?.trim() || null,
+    }).eq('id', id);
+    setModalRecibido(null); cargar();
+  };
+
   const confirmarContinuar = async (id) => {
     await supabase.from('pedidos').update({ confirmado_por: usuario.nombre, confirmado_en: new Date().toISOString() }).eq('id', id);
     cargar();
@@ -1192,6 +1204,9 @@ function Pedidos({ rol, usuario }) {
   const puedeEliminarDef = rol === 'dueno' || accesoTotal(usuario); // borrado definitivo, uso administrativo puntual
   const esperandoConfirmacionSolicitante = (p) => p.disponibilidad_enviada_en && !p.confirmado_en;
   const puedeConfirmar = (p) => p.mail === usuario.mail || rol === 'dueno' || accesoTotal(usuario);
+  // Solo el que hizo el pedido puede marcarlo como recibido (sin excepciones, ni
+  // accesoTotal), una sola vez, y solo si ya está entregado.
+  const puedeMarcarRecibido = (p) => p.estado === 'entregado' && p.mail === usuario.mail && !p.recibido_en;
 
   const lista = filtro === 'Todos' ? pedidos : pedidos.filter(p => p.estado === filtro);
   const fmt = (iso) => new Date(iso).toLocaleString('es-AR');
@@ -1257,6 +1272,13 @@ function Pedidos({ rol, usuario }) {
 
             {(rol === 'deposito' || accesoTotal(usuario)) && p.estado === 'aprobado' && p.confirmado_en && <button onClick={() => entregar(p)} style={{ ...btnPri, background: '#0D9488' }}><ArrowUpFromLine size={16} /> Marcar entregado (descuenta stock)</button>}
             {rol === 'deposito' && p.estado === 'pendiente' && <div style={{ fontSize: 13, color: '#D97706', fontWeight: 600 }}>⏳ Esperando aprobación para poder entregar</div>}
+
+            {p.recibido_en && <div style={{ background: '#E7F8EF', border: '1px solid #A7E3C5', borderRadius: 9, padding: '11px 14px', fontSize: 13, color: '#059669' }}>
+              <div style={{ fontWeight: 600 }}>✓ Recibido por {p.recibido_por} · {fmt(p.recibido_en)}</div>
+              {p.recibido_observacion && <div style={{ background: '#fff', borderRadius: 7, padding: '8px 11px', marginTop: 8, fontSize: 12.5, color: '#475569' }}><b>📝 Observación:</b> {p.recibido_observacion}</div>}
+            </div>}
+
+            {puedeMarcarRecibido(p) && <button onClick={() => setModalRecibido(p)} style={{ ...btnPri, background: '#059669' }}><CheckCircle2 size={16} /> Pedido recibido</button>}
           </div>))}
 
       {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
@@ -1267,6 +1289,7 @@ function Pedidos({ rol, usuario }) {
 
       {modalAnular && <ModalAnularPedido pedido={modalAnular} onClose={() => setModalAnular(null)} onConfirm={(motivo) => anular(modalAnular.id, motivo)} />}
       {modalDisponibilidad && <ModalDisponibilidad pedido={modalDisponibilidad} onClose={() => setModalDisponibilidad(null)} onConfirm={(items, obs) => enviarDisponibilidad(modalDisponibilidad, items, obs)} />}
+      {modalRecibido && <ModalRecibidoPedido pedido={modalRecibido} onClose={() => setModalRecibido(null)} onConfirm={(obs) => marcarRecibido(modalRecibido.id, obs)} />}
       {sinTelefono && <ModalShell onClose={() => setSinTelefono(null)}>
         <h3 style={{ margin: '0 0 8px', color: '#D97706' }}>Confirmación guardada</h3>
         <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>Se guardó la disponibilidad, pero <b>{sinTelefono}</b> no tiene un teléfono cargado, así que no se pudo abrir WhatsApp. Se lo podés cargar en el panel de Usuarios, o avisarle por otro medio que confirme en la app.</p>
@@ -1284,6 +1307,18 @@ function ModalAnularPedido({ pedido, onClose, onConfirm }) {
       <p style={{ fontSize: 14, color: '#475569', margin: '0 0 14px' }}>Por ejemplo, porque en depósito no hay algún ítem solicitado. El pedido queda registrado como anulado, con el motivo si querés dejarlo.</p>
       <Field label="Motivo (opcional)"><textarea value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="ej: no hay stock del compresor solicitado" style={{ ...inp, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} /></Field>
       <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Volver</button><button onClick={() => onConfirm(motivo)} style={{ ...btnPri, flex: 1, background: '#B45309' }}><XCircle size={16} /> Anular pedido</button></div>
+    </ModalShell>
+  );
+}
+
+function ModalRecibidoPedido({ pedido, onClose, onConfirm }) {
+  const [obs, setObs] = useState('');
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 8px', color: '#059669' }}>Confirmar recepción — Pedido #{pedido.numero}</h3>
+      <p style={{ fontSize: 14, color: '#475569', margin: '0 0 14px' }}>Confirmás que este pedido llegó. Queda registrado con tu nombre y la fecha.</p>
+      <Field label="¿Alguna observación? (ej: lo recibió otra persona, o quedó en otra base)"><textarea value={obs} onChange={e => setObs(e.target.value)} placeholder="Opcional" style={{ ...inp, minHeight: 70, resize: 'vertical', fontFamily: 'inherit' }} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Volver</button><button onClick={() => onConfirm(obs)} style={{ ...btnPri, flex: 1, background: '#059669' }}><CheckCircle2 size={16} /> Confirmar recepción</button></div>
     </ModalShell>
   );
 }
