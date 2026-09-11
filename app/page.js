@@ -333,18 +333,36 @@ function Sidebar({ vista, setVista, rol, usuario }) {
   );
 }
 
+// Trae TODAS las filas de una consulta a Supabase. Supabase corta cualquier
+// SELECT en 1000 filas por defecto, así que paginamos de a 1000 con .range()
+// hasta que una página venga incompleta. `armarConsulta(desde, hasta)` tiene que
+// devolver la consulta ya con .range(desde, hasta) aplicado.
+async function traerTodas(armarConsulta) {
+  const PAGINA = 1000;
+  let desde = 0;
+  const todo = [];
+  for (;;) {
+    const { data, error } = await armarConsulta(desde, desde + PAGINA - 1);
+    if (error) { console.error('traerTodas:', error); break; }
+    if (!data || data.length === 0) break;
+    todo.push(...data);
+    if (data.length < PAGINA) break;
+    desde += PAGINA;
+  }
+  return todo;
+}
+
 // ========================= DASHBOARD =========================
 function Dashboard() {
   const [stats, setStats] = useState(null);
   useEffect(() => {
     (async () => {
-      const [prod, garr, cob, ped] = await Promise.all([
-        supabase.from('productos').select('deposito, cantidad'),
+      const [productos, garr, cob, ped] = await Promise.all([
+        traerTodas((d, h) => supabase.from('productos').select('deposito, cantidad').range(d, h)),
         supabase.from('garrafas').select('estado'),
         supabase.from('cobre').select('metros'),
         supabase.from('pedidos').select('estado, numero, solicitante, creado_en').order('creado_en', { ascending: false }).limit(5),
       ]);
-      const productos = prod.data || [];
       const garrafas = garr.data || [];
       const cobre = cob.data || [];
       setStats({
@@ -441,8 +459,8 @@ function Stock({ rol, usuario }) {
 
   const cargar = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('productos').select('*').order('nombre');
-    setStock(data || []);
+    const data = await traerTodas((d, h) => supabase.from('productos').select('*').order('nombre').range(d, h));
+    setStock(data);
     setLoading(false);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
