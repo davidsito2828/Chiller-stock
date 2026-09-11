@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock, Menu, Users, KeyRound } from 'lucide-react';
+import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock, Menu, Users, KeyRound, History } from 'lucide-react';
 
 const AZUL = '#0000DE';
 const AZUL_OSC = '#0000A8';
@@ -89,6 +89,7 @@ export default function Home() {
           {vista === 'vehiculos' && <Vehiculos rol={rol} usuario={usuario} />}
           {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => irA('pedidos')} />}
           {vista === 'pedidos' && <Pedidos rol={rol} usuario={usuario} />}
+          {vista === 'movimientos' && ((rol === 'supervisor' || rol === 'dueno' || accesoTotal(usuario)) ? <Movimientos /> : <AccesoDenegado titulo="Movimientos" mensaje="Este módulo es solo para Gerente y Supervisores." />)}
           {vista.startsWith('base:') && <BaseInventario baseId={vista.slice(5)} usuario={usuario} />}
         </main>
       </div>
@@ -295,13 +296,15 @@ function Sidebar({ vista, setVista, rol, usuario }) {
     { id: 'vehiculos', label: 'Vehículos', icon: Truck, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
     { id: 'carrito', label: 'Mi Pedido', icon: ShoppingCart, roles: ['supervisor', 'tecnico'], badge: carrito.length },
     { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
+    // Solo supervisor y gerencia (dueño o accesoTotal, sin importar su rol de base).
+    { id: 'movimientos', label: 'Movimientos', icon: History, roles: ['supervisor', 'dueno'], total: true },
   ];
   const misBases = basesPermitidas(usuario);
   return (
     <aside style={{ width: 232, background: `linear-gradient(180deg, ${AZUL_PROF} 0%, #0A1048 100%)`, padding: '22px 16px', minHeight: 'calc(100vh - 66px)', position: 'relative' }}>
       <div style={{ position: 'absolute', top: 0, right: 0, width: '100%', height: 200, background: `radial-gradient(circle at 80% 0%, rgba(14,165,233,0.18), transparent 60%)`, pointerEvents: 'none' }} />
       <div style={{ fontSize: 10.5, fontWeight: 700, color: 'rgba(255,255,255,0.4)', letterSpacing: '1.5px', textTransform: 'uppercase', padding: '0 12px 12px', position: 'relative' }}>Menú</div>
-      {items.filter(i => i.roles.includes(rol)).map((it, idx) => {
+      {items.filter(i => i.roles.includes(rol) || (i.total && accesoTotal(usuario))).map((it, idx) => {
         const Icon = it.icon; const active = vista === it.id;
         return (
           <button key={it.id} onClick={() => setVista(it.id)} className="fadein"
@@ -350,6 +353,19 @@ async function traerTodas(armarConsulta) {
     desde += PAGINA;
   }
   return todo;
+}
+
+// Inserta una fila en `movimientos` (registro de auditoría de Stock/Pedidos/
+// Garrafas). Se llama SIEMPRE al final, solo después de que la acción principal
+// ya se guardó bien — si la acción falló, no se llama y no queda registro.
+// referenciaTipo/referenciaId son opcionales (ej: 'pedido', 45), para poder
+// después cruzar el movimiento con el registro que lo originó.
+async function registrarMovimiento(usuario, tipo, detalle, referenciaTipo = null, referenciaId = null) {
+  const { error } = await supabase.from('movimientos').insert({
+    tipo, usuario: usuario?.nombre || '—', fecha: new Date().toISOString(), detalle,
+    referencia_tipo: referenciaTipo, referencia_id: referenciaId,
+  });
+  if (error) console.error('registrarMovimiento:', error);
 }
 
 // ========================= DASHBOARD =========================
@@ -435,6 +451,97 @@ function Dashboard() {
   );
 }
 
+// Etiquetas legibles para los `tipo` que guarda registrarMovimiento().
+const TIPO_MOVIMIENTO_LABEL = {
+  producto_creado: 'Producto creado',
+  producto_editado: 'Producto editado',
+  producto_eliminado: 'Producto eliminado',
+  stock_excel: 'Actualización masiva (Excel)',
+  pedido_creado: 'Pedido creado',
+  pedido_aprobado: 'Pedido aprobado',
+  pedido_rechazado: 'Pedido rechazado',
+  pedido_anulado: 'Pedido anulado',
+  pedido_disponibilidad: 'Disponibilidad revisada',
+  pedido_confirmado: 'Pedido confirmado',
+  pedido_entregado: 'Pedido entregado',
+  pedido_recibido: 'Pedido recibido',
+  garrafa_salida: 'Salida de garrafa',
+  garrafa_regreso: 'Regreso de garrafa',
+};
+
+// ========================= MOVIMIENTOS =========================
+// Registro central de auditoría: todo lo que va agregando registrarMovimiento()
+// desde Stock, Pedidos y Garrafas. Solo lectura. Visible para supervisor y
+// gerencia (dueño / accesoTotal) — depósito no la ve (se controla en Home/Sidebar).
+function Movimientos() {
+  const [movs, setMovs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fPersona, setFPersona] = useState('');
+  const [fTipo, setFTipo] = useState('Todos');
+  const [rango, setRango] = useState({ desde: '', hasta: '' });
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    // Misma paginación que productos: por si "movimientos" también supera 1000 filas.
+    const data = await traerTodas((d, h) => supabase.from('movimientos').select('*').order('fecha', { ascending: false }).range(d, h));
+    setMovs(data);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const personas = useMemo(() => Array.from(new Set(movs.map(m => m.usuario).filter(Boolean))).sort(), [movs]);
+  const tipos = useMemo(() => Array.from(new Set(movs.map(m => m.tipo).filter(Boolean))).sort(), [movs]);
+
+  const filtrados = movs.filter(m => {
+    if (fTipo !== 'Todos' && m.tipo !== fTipo) return false;
+    if (fPersona.trim() && !(m.usuario || '').toLowerCase().includes(fPersona.trim().toLowerCase())) return false;
+    const dia = m.fecha ? fechaISOLocal(m.fecha) : '';
+    if (rango.desde && (!dia || dia < rango.desde)) return false;
+    if (rango.hasta && (!dia || dia > rango.hasta)) return false;
+    return true;
+  });
+
+  const fmtH = (d) => d ? new Date(d).toLocaleString('es-AR') : '—';
+
+  return (
+    <div>
+      <SectionTitle icon={History} title="Movimientos" sub="Registro de acciones en Stock, Pedidos y Garrafas" accion={<BotonRefrescar onClick={cargar} />} />
+
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <Select value={fTipo} onChange={setFTipo} options={['Todos', ...tipos]} />
+        <input value={fPersona} onChange={e => setFPersona(e.target.value)} list="movimientos-personas" placeholder="Filtrar por persona..."
+          style={{ ...inp, width: 'auto', minWidth: 210, flex: '0 1 260px' }} />
+        <datalist id="movimientos-personas">{personas.map(p => <option key={p} value={p} />)}</datalist>
+      </div>
+      <div style={{ marginBottom: 16 }}>
+        <SelectorRangoFechas desde={rango.desde} hasta={rango.hasta} onChange={setRango} />
+      </div>
+
+      {loading ? <Cargando /> : (
+        <div style={{ background: '#fff', borderRadius: 16, overflow: 'auto', boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5, minWidth: 780 }}>
+            <thead><tr style={{ background: `linear-gradient(135deg, ${AZUL}, #2937FF)`, color: '#fff', textAlign: 'left' }}>
+              <th style={th}>Fecha</th><th style={th}>Tipo</th><th style={th}>Usuario</th><th style={th}>Detalle</th>
+            </tr></thead>
+            <tbody>
+              {filtrados.map(m => (
+                <tr key={m.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ ...td, whiteSpace: 'nowrap', color: '#475569' }}>{fmtH(m.fecha)}</td>
+                  <td style={td}><span style={{ background: '#E6F1FB', color: '#0C447C', fontSize: 11.5, fontWeight: 700, padding: '3px 10px', borderRadius: 20 }}>{TIPO_MOVIMIENTO_LABEL[m.tipo] || m.tipo}</span></td>
+                  <td style={{ ...td, whiteSpace: 'nowrap', fontWeight: 600, color: TINTA }}>{m.usuario}</td>
+                  <td style={{ ...td, color: '#475569' }}>{m.detalle}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtrados.length === 0 && <Empty texto={movs.length === 0 ? 'Todavía no hay movimientos registrados' : 'No hay movimientos con esos filtros'} />}
+        </div>
+      )}
+      {!loading && filtrados.length > 0 && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>{filtrados.length} movimiento{filtrados.length > 1 ? 's' : ''}</div>}
+    </div>
+  );
+}
+
 // ========================= STOCK =========================
 function Stock({ rol, usuario }) {
   const [stock, setStock] = useState([]);
@@ -504,19 +611,24 @@ function Stock({ rol, usuario }) {
   };
 
   const crearProducto = async (p) => {
-    await supabase.from('productos').insert({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, deposito: p.deposito, cantidad: p.cantidad });
+    const { data, error } = await supabase.from('productos').insert({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, deposito: p.deposito, cantidad: p.cantidad }).select('id').single();
+    if (!error) registrarMovimiento(usuario, 'producto_creado', `Producto creado: ${p.nombre} (${p.deposito}) · cant. ${p.cantidad}`, 'producto', data?.id ?? null);
     setModalNuevo(false);
     cargar();
   };
 
-  const editarProducto = async (id, p) => {
-    await supabase.from('productos').update({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, deposito: p.deposito, cantidad: p.cantidad }).eq('id', id);
+  // anterior = el producto tal cual estaba antes de editar (para loguear el
+  // cambio de cantidad), viene de modalEditar en el llamado.
+  const editarProducto = async (id, p, anterior) => {
+    const { error } = await supabase.from('productos').update({ nombre: p.nombre, marca: p.marca, modelo: p.modelo, descripcion: p.descripcion, codigo: p.codigo, categoria: p.categoria, deposito: p.deposito, cantidad: p.cantidad }).eq('id', id);
+    if (!error) registrarMovimiento(usuario, 'producto_editado', `${p.nombre}: ${anterior?.cantidad ?? '?'} → ${p.cantidad} (${p.deposito})`, 'producto', id);
     setModalEditar(null);
     cargar();
   };
 
-  const eliminarProducto = async (id) => {
-    await supabase.from('productos').delete().eq('id', id);
+  const eliminarProducto = async (producto) => {
+    const { error } = await supabase.from('productos').delete().eq('id', producto.id);
+    if (!error) registrarMovimiento(usuario, 'producto_eliminado', `Producto eliminado: ${producto.nombre} (${producto.deposito})`, 'producto', producto.id);
     setConfirmDel(null);
     cargar();
   };
@@ -625,6 +737,7 @@ function Stock({ rol, usuario }) {
       return;
     }
     const cargados = typeof data === 'number' ? data : previewExcel.finales.length;
+    registrarMovimiento(usuario, 'stock_excel', `Actualización masiva de Stock General por Excel — ${cargados} productos cargados`, 'stock_general', null);
     setPreviewExcel(null);
     setMsgExcel(`✓ Inventario actualizado: ${cargados} producto(s) cargados. Se reemplazó todo el Stock General anterior.`);
     cargar();
@@ -704,11 +817,11 @@ function Stock({ rol, usuario }) {
       )}
       {modalEntrada && <ModalEntrada item={modalEntrada} onClose={() => setModalEntrada(null)} onConfirm={ingresar} />}
       {modalNuevo && <ModalNuevoProducto rubros={['Herramientas', 'Insumos', 'Materiales', 'Repuestos']} onClose={() => setModalNuevo(false)} onConfirm={crearProducto} />}
-      {modalEditar && <ModalNuevoProducto editar producto={modalEditar} rubros={['Herramientas', 'Insumos', 'Materiales', 'Repuestos']} onClose={() => setModalEditar(null)} onConfirm={(p) => editarProducto(modalEditar.id, p)} />}
+      {modalEditar && <ModalNuevoProducto editar producto={modalEditar} rubros={['Herramientas', 'Insumos', 'Materiales', 'Repuestos']} onClose={() => setModalEditar(null)} onConfirm={(p) => editarProducto(modalEditar.id, p, modalEditar)} />}
       {confirmDel && <ModalShell onClose={() => setConfirmDel(null)}>
         <h3 style={{ margin: '0 0 8px', color: '#DC2626' }}>Eliminar producto</h3>
         <p style={{ fontSize: 14, color: '#475569', margin: '0 0 18px' }}>¿Seguro que querés eliminar <b>{confirmDel.nombre}</b> ({confirmDel.deposito})? Esta acción no se puede deshacer.</p>
-        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminarProducto(confirmDel.id)} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Eliminar</button></div>
+        <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmDel(null)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => eliminarProducto(confirmDel)} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Eliminar</button></div>
       </ModalShell>}
       {previewExcel && <ModalShell onClose={() => !importando && setPreviewExcel(null)}>
         <h3 style={{ margin: '0 0 6px', color: AZUL, display: 'flex', alignItems: 'center', gap: 8 }}><Upload size={20} /> Revisar antes de actualizar</h3>
@@ -824,13 +937,16 @@ function Refrigerantes({ rol, usuario }) {
   const diasEntre = (iso) => iso ? Math.max(0, Math.round((Date.now() - new Date(iso)) / 86400000)) : 0;
 
   const salida = async (d) => {
-    await supabase.from('garrafas').update({ estado: 'afuera', supervisor: d.supervisor, destino: d.destino, salida: new Date().toISOString(), regreso: null, dias: null }).eq('id', d.garrafaId);
+    const g = garrafas.find(x => x.id === d.garrafaId);
+    const { error } = await supabase.from('garrafas').update({ estado: 'afuera', supervisor: d.supervisor, destino: d.destino, salida: new Date().toISOString(), regreso: null, dias: null }).eq('id', d.garrafaId);
+    if (!error) registrarMovimiento(usuario, 'garrafa_salida', `Garrafa ${g?.codigo ?? d.garrafaId} — salida con ${d.supervisor}${d.destino ? ` a ${d.destino}` : ''}`, 'garrafa', d.garrafaId);
     setModal(null); cargar();
   };
   const regreso = async (d) => {
     const g = garrafas.find(x => x.id === d.garrafaId);
     const dias = diasEntre(g.salida);
-    await supabase.from('garrafas').update({ estado: 'vacia', regreso: new Date().toISOString(), dias, quien_devuelve: d.quienDevuelve }).eq('id', d.garrafaId);
+    const { error } = await supabase.from('garrafas').update({ estado: 'vacia', regreso: new Date().toISOString(), dias, quien_devuelve: d.quienDevuelve }).eq('id', d.garrafaId);
+    if (!error) registrarMovimiento(usuario, 'garrafa_regreso', `Garrafa ${g?.codigo ?? d.garrafaId} — regreso, devolvió ${d.quienDevuelve} (${dias} día${dias !== 1 ? 's' : ''} afuera)`, 'garrafa', d.garrafaId);
     setModal(null); cargar();
   };
   const recargar = async (id) => {
@@ -1093,6 +1209,7 @@ function Carrito({ usuario, onIrPedidos }) {
         es_nuevo: !!c.esNuevo,
       })));
       await supabase.from('contador_pedidos').update({ ultimo: nuevoNum }).eq('id', 1);
+      registrarMovimiento(usuario, 'pedido_creado', `Pedido #${numero} creado por ${usuario.nombre}`, 'pedido', pedido.id);
     }
     carritoStore.set([]);
     setGuardando(false);
@@ -1152,12 +1269,21 @@ function Pedidos({ rol, usuario }) {
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
-  const aprobar = async (id) => { await supabase.from('pedidos').update({ estado: 'aprobado', aprobado_por: usuario.nombre }).eq('id', id); cargar(); };
-  const rechazar = async (id) => { await supabase.from('pedidos').update({ estado: 'rechazado', aprobado_por: usuario.nombre }).eq('id', id); cargar(); };
+  const aprobar = async (id) => {
+    const { error } = await supabase.from('pedidos').update({ estado: 'aprobado', aprobado_por: usuario.nombre }).eq('id', id);
+    if (!error) { const p = pedidos.find(x => x.id === id); registrarMovimiento(usuario, 'pedido_aprobado', `Pedido #${p?.numero ?? id} aprobado`, 'pedido', id); }
+    cargar();
+  };
+  const rechazar = async (id) => {
+    const { error } = await supabase.from('pedidos').update({ estado: 'rechazado', aprobado_por: usuario.nombre }).eq('id', id);
+    if (!error) { const p = pedidos.find(x => x.id === id); registrarMovimiento(usuario, 'pedido_rechazado', `Pedido #${p?.numero ?? id} rechazado`, 'pedido', id); }
+    cargar();
+  };
   const eliminar = async (id) => { await supabase.from('pedidos').delete().eq('id', id); setConfirmDel(null); cargar(); };
 
   const anular = async (id, motivo) => {
-    await supabase.from('pedidos').update({ estado: 'anulado', anulado_por: usuario.nombre, anulado_motivo: motivo || null, anulado_en: new Date().toISOString() }).eq('id', id);
+    const { error } = await supabase.from('pedidos').update({ estado: 'anulado', anulado_por: usuario.nombre, anulado_motivo: motivo || null, anulado_en: new Date().toISOString() }).eq('id', id);
+    if (!error) { const p = pedidos.find(x => x.id === id); registrarMovimiento(usuario, 'pedido_anulado', `Pedido #${p?.numero ?? id} anulado${motivo ? `: ${motivo}` : ''}`, 'pedido', id); }
     setModalAnular(null); cargar();
   };
 
@@ -1174,11 +1300,12 @@ function Pedidos({ rol, usuario }) {
         await supabase.from('pedido_items').update({ disponible: it.disponible }).eq('id', it.id);
       }
     }
-    await supabase.from('pedidos').update({
+    const { error: errDisp } = await supabase.from('pedidos').update({
       disponibilidad_enviada_por: usuario.nombre,
       disponibilidad_enviada_en: new Date().toISOString(),
       observaciones_disponibilidad: observaciones || null,
     }).eq('id', pedido.id);
+    if (!errDisp) registrarMovimiento(usuario, 'pedido_disponibilidad', `Disponibilidad revisada para el pedido #${pedido.numero}`, 'pedido', pedido.id);
 
     // Armar y abrir WhatsApp para el solicitante, si tiene teléfono cargado
     const { data: u } = await supabase.from('usuarios_public').select('telefono').eq('mail', pedido.mail).maybeSingle();
@@ -1203,16 +1330,18 @@ function Pedidos({ rol, usuario }) {
   // Paso extra DESPUÉS de "entregado": el solicitante confirma que el pedido le
   // llegó. No cambia p.estado (sigue 'entregado'), solo agrega info de recepción.
   const marcarRecibido = async (id, observacion) => {
-    await supabase.from('pedidos').update({
+    const { error } = await supabase.from('pedidos').update({
       recibido_por: usuario.nombre,
       recibido_en: new Date().toISOString(),
       recibido_observacion: observacion?.trim() || null,
     }).eq('id', id);
+    if (!error) { const p = pedidos.find(x => x.id === id); registrarMovimiento(usuario, 'pedido_recibido', `Pedido #${p?.numero ?? id} marcado como recibido por ${usuario.nombre}`, 'pedido', id); }
     setModalRecibido(null); cargar();
   };
 
   const confirmarContinuar = async (id) => {
-    await supabase.from('pedidos').update({ confirmado_por: usuario.nombre, confirmado_en: new Date().toISOString() }).eq('id', id);
+    const { error } = await supabase.from('pedidos').update({ confirmado_por: usuario.nombre, confirmado_en: new Date().toISOString() }).eq('id', id);
+    if (!error) { const p = pedidos.find(x => x.id === id); registrarMovimiento(usuario, 'pedido_confirmado', `Pedido #${p?.numero ?? id} confirmado por ${usuario.nombre}`, 'pedido', id); }
     cargar();
   };
 
@@ -1223,7 +1352,8 @@ function Pedidos({ rol, usuario }) {
         if (prod) await supabase.from('productos').update({ cantidad: Math.max(0, prod.cantidad - it.cantidad) }).eq('id', it.producto_id);
       }
     }
-    await supabase.from('pedidos').update({ estado: 'entregado' }).eq('id', pedido.id);
+    const { error } = await supabase.from('pedidos').update({ estado: 'entregado' }).eq('id', pedido.id);
+    if (!error) registrarMovimiento(usuario, 'pedido_entregado', `Pedido #${pedido.numero} entregado a ${pedido.solicitante}`, 'pedido', pedido.id);
     cargar();
   };
 
