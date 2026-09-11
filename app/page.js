@@ -918,6 +918,100 @@ function ModalEntrada({ item, onClose, onConfirm }) {
   );
 }
 
+// ---- Acciones sobre garrafas, compartidas entre la pantalla central de
+// Refrigerantes y "Seguimiento de refrigerante" de cada Base — para no
+// duplicar la lógica de escritura ni el texto de los movimientos. ----
+async function accionSalidaGarrafa(usuario, garrafas, d) {
+  const g = garrafas.find(x => x.id === d.garrafaId);
+  const { error } = await supabase.from('garrafas').update({ estado: 'afuera', supervisor: d.supervisor, destino: d.destino, base: d.base ?? null, salida: new Date().toISOString(), regreso: null, dias: null }).eq('id', d.garrafaId);
+  if (!error) registrarMovimiento(usuario, 'garrafa_salida', `Garrafa ${g?.codigo ?? d.garrafaId} — salida con ${d.supervisor}${d.destino ? ` a ${d.destino}` : ''}`, 'garrafa', d.garrafaId);
+}
+async function accionRegresoGarrafa(usuario, garrafas, d) {
+  const g = garrafas.find(x => x.id === d.garrafaId);
+  const dias = g?.salida ? Math.max(0, Math.round((Date.now() - new Date(g.salida)) / 86400000)) : 0;
+  const { error } = await supabase.from('garrafas').update({ estado: 'vacia', regreso: new Date().toISOString(), dias, quien_devuelve: d.quienDevuelve }).eq('id', d.garrafaId);
+  if (!error) registrarMovimiento(usuario, 'garrafa_regreso', `Garrafa ${g?.codigo ?? d.garrafaId} — regreso, devolvió ${d.quienDevuelve} (${dias} día${dias !== 1 ? 's' : ''} afuera)`, 'garrafa', d.garrafaId);
+}
+async function accionRegistrarUsoGarrafa(usuario, garrafas, d) {
+  const g = garrafas.find(x => x.id === d.garrafaId);
+  const { error } = await supabase.from('usos_garrafa').insert({
+    garrafa_id: d.garrafaId,
+    fecha: new Date().toISOString(),
+    tecnico: d.tecnico,
+    trabajo: d.trabajo || null,
+    kg_usados: d.kgUsados,
+    registrado_por: usuario.nombre,
+  });
+  if (!error) registrarMovimiento(usuario, 'uso_refrigerante', `Garrafa ${g?.codigo ?? d.garrafaId}: ${d.kgUsados} kg usados por ${d.tecnico}${d.trabajo ? ` — ${d.trabajo}` : ''}`, 'garrafa', d.garrafaId);
+}
+function accionRecargarGarrafa(id) {
+  return supabase.from('garrafas').update({ estado: 'disponible', supervisor: null, destino: null, salida: null, regreso: null, dias: null, quien_devuelve: null }).eq('id', id);
+}
+// Kg restantes estimados: peso_inicial menos lo usado desde la última vez que
+// salió llena (g.salida). No hace falta reconstruir el historial de regresos:
+// solo se puede "Sale" desde 'disponible', así que cada g.salida ya marca el
+// arranque de un tanque lleno; si nunca volvió vacía, es su primera salida y
+// no hay usos anteriores a esa fecha de todos modos.
+function calcularRestantePorGarrafa(garrafas, usos) {
+  const mapa = {};
+  for (const g of garrafas) {
+    if (g.estado !== 'afuera' || !g.salida) continue;
+    const usado = usos
+      .filter(u => u.garrafa_id === g.id && u.fecha && new Date(u.fecha) >= new Date(g.salida))
+      .reduce((a, b) => a + Number(b.kg_usados || 0), 0);
+    const inicial = Number(g.peso_inicial ?? 13.6);
+    const restante = inicial - usado;
+    if (restante > 0) mapa[g.id] = restante;
+  }
+  return mapa;
+}
+
+// Tabla de garrafas + acciones, reutilizada por la pantalla central de
+// Refrigerantes (todas las garrafas) y por "Seguimiento de refrigerante" de
+// cada Base (solo las suyas). Quien la usa maneja el estado del modal y decide
+// qué modal abrir en onAbrirModal(tipo, garrafa).
+function TablaGarrafas({ lista, restantePorGarrafa, puedeGestionar, puedeOperar, puedeRegistrarUso, mostrarEliminar = true, bloquearConBase = false, onAbrirModal, onRecargar, onEliminar, diasEntre, fmt, textoVacio = 'No hay garrafas en este estado' }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 800 }}>
+        <thead><tr style={{ background: 'linear-gradient(135deg, #0284C7, #0EA5E9)', color: '#fff', textAlign: 'left' }}>
+          <th style={th}>Garrafa</th><th style={th}>Gas / Tipo</th><th style={th}>Estado</th><th style={th}>Restante</th><th style={th}>Supervisor</th><th style={th}>Destino</th><th style={th}>Salida</th><th style={th}>Días</th><th style={th}>Regreso</th>{puedeGestionar && <th style={{ ...th, textAlign: 'center', width: 220 }}>Acción</th>}
+        </tr></thead>
+        <tbody>
+          {lista.map(g => {
+            const da = g.estado === 'afuera' ? diasEntre(g.salida) : null;
+            const restante = restantePorGarrafa[g.id];
+            const bloqueada = bloquearConBase && g.base;
+            return (
+              <tr key={g.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                <td style={td}><b style={{ color: '#01579b', fontSize: 14 }}>{g.codigo}</b></td>
+                <td style={td}><span style={{ background: gasColor(g.gas) + '20', color: gasColor(g.gas), fontWeight: 700, fontSize: 12, padding: '2px 9px', borderRadius: 14 }}>{g.gas.toUpperCase()}</span><div style={{ fontSize: 11.5, color: '#999', marginTop: 2 }}>{g.tipo_garrafa}</div></td>
+                <td style={td}><GarrafaEstado estado={g.estado} /></td>
+                <td style={td}>{restante != null ? <span style={{ fontSize: 12, color: '#555' }}>≈ {restante.toFixed(1)} kg restantes</span> : '—'}</td>
+                <td style={td}>{g.supervisor || '—'}</td><td style={td}>{g.destino || '—'}</td><td style={td}>{fmt(g.salida)}</td>
+                <td style={td}>{g.estado === 'afuera' ? <b style={{ color: da > 30 ? '#c62828' : '#e65100' }}>{da} d</b> : g.dias != null ? <b style={{ color: '#555' }}>{g.dias} d</b> : '—'}</td>
+                <td style={td}>{g.regreso ? <span>{fmt(g.regreso)}{g.quien_devuelve && <div style={{ fontSize: 11, color: '#999' }}>por {g.quien_devuelve}</div>}</span> : '—'}</td>
+                {puedeGestionar && <td style={{ ...td, textAlign: 'center' }}>
+                  {bloqueada ? <span style={{ fontSize: 12, color: '#0288d1', fontWeight: 600 }}>Se gestiona desde {g.base}</span> : (
+                    <div style={{ display: 'flex', gap: 5, justifyContent: 'center', flexWrap: 'wrap' }}>
+                      {puedeOperar && g.estado === 'disponible' && <button onClick={() => onAbrirModal('salida', g)} style={{ ...btnMini, background: '#e65100' }}><ArrowUpFromLine size={13} /> Sale</button>}
+                      {puedeOperar && g.estado === 'afuera' && <button onClick={() => onAbrirModal('regreso', g)} style={{ ...btnMini, background: '#00897b' }}><ArrowDownToLine size={13} /> Volvió vacía</button>}
+                      {puedeOperar && g.estado === 'vacia' && <button onClick={() => onRecargar(g.id)} style={{ ...btnMini, background: '#0288d1' }}><CheckCircle2 size={13} /> Recargada</button>}
+                      {puedeRegistrarUso && g.estado === 'afuera' && <button onClick={() => onAbrirModal('uso', g)} style={{ ...btnMini, background: '#6D28D9' }}><Droplets size={13} /> Registrar uso</button>}
+                      <button onClick={() => onAbrirModal('verUsos', g)} title="Ver usos" style={{ ...btnMini, background: '#64748b' }}><FileText size={13} /></button>
+                      {puedeOperar && mostrarEliminar && <button onClick={() => onEliminar(g.id)} style={{ ...btnMini, background: '#fff', color: '#c62828', border: '1.5px solid #ffcdd2' }}><Trash2 size={13} /></button>}
+                    </div>
+                  )}
+                </td>}
+              </tr>);
+          })}
+        </tbody>
+      </table>
+      {lista.length === 0 && <Empty texto={textoVacio} />}
+    </div>
+  );
+}
+
 // ========================= REFRIGERANTES =========================
 function Refrigerantes({ rol, usuario }) {
   const [garrafas, setGarrafas] = useState([]);
@@ -928,6 +1022,7 @@ function Refrigerantes({ rol, usuario }) {
   const esDeposito = rol === 'deposito' || accesoTotal(usuario);
   // Registrar uso: además de depósito, lo puede hacer supervisor ("mesa de ayuda").
   const puedeRegistrarUso = esDeposito || rol === 'supervisor';
+  const puedeGestionar = esDeposito || puedeRegistrarUso;
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -941,59 +1036,13 @@ function Refrigerantes({ rol, usuario }) {
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
-  // Kg restantes estimados: peso_inicial menos lo usado desde la última vez que
-  // salió llena (g.salida). No hace falta reconstruir el historial de regresos:
-  // solo se puede "Sale" desde 'disponible', así que cada g.salida ya marca el
-  // arranque de un tanque lleno; si nunca volvió vacía, es su primera salida y
-  // no hay usos anteriores a esa fecha de todos modos.
-  const restantePorGarrafa = useMemo(() => {
-    const mapa = {};
-    for (const g of garrafas) {
-      if (g.estado !== 'afuera' || !g.salida) continue;
-      const usado = usos
-        .filter(u => u.garrafa_id === g.id && u.fecha && new Date(u.fecha) >= new Date(g.salida))
-        .reduce((a, b) => a + Number(b.kg_usados || 0), 0);
-      const inicial = Number(g.peso_inicial ?? 13.6);
-      const restante = inicial - usado;
-      if (restante > 0) mapa[g.id] = restante;
-    }
-    return mapa;
-  }, [garrafas, usos]);
-
+  const restantePorGarrafa = useMemo(() => calcularRestantePorGarrafa(garrafas, usos), [garrafas, usos]);
   const diasEntre = (iso) => iso ? Math.max(0, Math.round((Date.now() - new Date(iso)) / 86400000)) : 0;
 
-  const salida = async (d) => {
-    const g = garrafas.find(x => x.id === d.garrafaId);
-    const { error } = await supabase.from('garrafas').update({ estado: 'afuera', supervisor: d.supervisor, destino: d.destino, salida: new Date().toISOString(), regreso: null, dias: null }).eq('id', d.garrafaId);
-    if (!error) registrarMovimiento(usuario, 'garrafa_salida', `Garrafa ${g?.codigo ?? d.garrafaId} — salida con ${d.supervisor}${d.destino ? ` a ${d.destino}` : ''}`, 'garrafa', d.garrafaId);
-    setModal(null); cargar();
-  };
-  const regreso = async (d) => {
-    const g = garrafas.find(x => x.id === d.garrafaId);
-    const dias = diasEntre(g.salida);
-    const { error } = await supabase.from('garrafas').update({ estado: 'vacia', regreso: new Date().toISOString(), dias, quien_devuelve: d.quienDevuelve }).eq('id', d.garrafaId);
-    if (!error) registrarMovimiento(usuario, 'garrafa_regreso', `Garrafa ${g?.codigo ?? d.garrafaId} — regreso, devolvió ${d.quienDevuelve} (${dias} día${dias !== 1 ? 's' : ''} afuera)`, 'garrafa', d.garrafaId);
-    setModal(null); cargar();
-  };
-  const registrarUso = async (d) => {
-    const g = garrafas.find(x => x.id === d.garrafaId);
-    const { error } = await supabase.from('usos_garrafa').insert({
-      garrafa_id: d.garrafaId,
-      fecha: new Date().toISOString(),
-      tecnico: d.tecnico,
-      trabajo: d.trabajo || null,
-      kg_usados: d.kgUsados,
-      registrado_por: usuario.nombre,
-    });
-    if (!error) {
-      registrarMovimiento(usuario, 'uso_refrigerante', `Garrafa ${g?.codigo ?? d.garrafaId}: ${d.kgUsados} kg usados por ${d.tecnico}${d.trabajo ? ` — ${d.trabajo}` : ''}`, 'garrafa', d.garrafaId);
-    }
-    setModal(null); cargar();
-  };
-  const recargar = async (id) => {
-    await supabase.from('garrafas').update({ estado: 'disponible', supervisor: null, destino: null, salida: null, regreso: null, dias: null, quien_devuelve: null }).eq('id', id);
-    cargar();
-  };
+  const salida = async (d) => { await accionSalidaGarrafa(usuario, garrafas, d); setModal(null); cargar(); };
+  const regreso = async (d) => { await accionRegresoGarrafa(usuario, garrafas, d); setModal(null); cargar(); };
+  const registrarUso = async (d) => { await accionRegistrarUsoGarrafa(usuario, garrafas, d); setModal(null); cargar(); };
+  const recargar = async (id) => { await accionRecargarGarrafa(id); cargar(); };
   const nueva = async (d) => {
     await supabase.from('garrafas').insert({ codigo: d.codigo, gas: d.gas, tipo_garrafa: d.tg, marca: d.ma, estado: 'disponible' });
     setModal(null); cargar();
@@ -1005,12 +1054,13 @@ function Refrigerantes({ rol, usuario }) {
   const afuera = garrafas.filter(g => g.estado === 'afuera').length;
   const vacias = garrafas.filter(g => g.estado === 'vacia').length;
   const lista = filtro === 'Todas' ? garrafas : garrafas.filter(g => g.estado === filtro);
+  const abrirModal = (tipo, g) => setModal({ tipo, garrafa: g });
 
   return (
     <div>
       <SectionTitle icon={Droplets} title="Refrigerantes — Control de Garrafas" sub="Trazabilidad individual · sale llena / vuelve vacía" accion={<BotonRefrescar onClick={cargar} />} />
       <div style={{ background: '#E1F5FE', border: '1px solid #b3e5fc', borderRadius: 11, padding: '13px 16px', marginBottom: 18, fontSize: 13.5, color: '#01579b' }}>
-        <b>Ciclo de cada garrafa:</b> logística registra cuando <b>sale</b> (a qué supervisor y destino) y cuando <b>vuelve vacía</b> (quién la devuelve y los días afuera, calculados solos). Mientras está afuera, depósito o supervisor pueden ir cargando cuánto <b>refrigerante se usó</b>. {!esDeposito && !puedeRegistrarUso && <span>Solo <b>Depósito/Logística</b> registra movimientos.</span>}
+        <b>Ciclo de cada garrafa:</b> logística registra cuando <b>sale</b> (a qué supervisor y destino) y cuando <b>vuelve vacía</b> (quién la devuelve y los días afuera, calculados solos). Mientras está afuera, depósito o supervisor pueden ir cargando cuánto <b>refrigerante se usó</b>. Las garrafas asignadas a una Base (Esmeralda, Perón 500, Torre Galicia) se gestionan desde el "Seguimiento de refrigerante" de esa base. {!puedeGestionar && <span>Solo <b>Depósito/Logística</b> registra movimientos.</span>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px,1fr))', gap: 14, marginBottom: 20 }}>
         {[['Disponibles (llenas)', disponibles, '#2e7d32', CheckCircle2], ['Afuera (en la calle)', afuera, '#e65100', ArrowUpFromLine], ['Vacías (a recargar)', vacias, '#c62828', ArrowDownToLine]].map(([t, v, col, Ic]) => (
@@ -1024,40 +1074,21 @@ function Refrigerantes({ rol, usuario }) {
         {esDeposito && <button onClick={() => setModal({ tipo: 'nueva' })} style={{ ...btnPri, background: '#0288d1', marginLeft: 'auto' }}><Plus size={16} /> Nueva garrafa</button>}
       </div>
       {loading ? <Cargando /> : (
-        <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 800 }}>
-            <thead><tr style={{ background: 'linear-gradient(135deg, #0284C7, #0EA5E9)', color: '#fff', textAlign: 'left' }}>
-              <th style={th}>Garrafa</th><th style={th}>Gas / Tipo</th><th style={th}>Estado</th><th style={th}>Restante</th><th style={th}>Supervisor</th><th style={th}>Destino</th><th style={th}>Salida</th><th style={th}>Días</th><th style={th}>Regreso</th>{puedeRegistrarUso && <th style={{ ...th, textAlign: 'center', width: 220 }}>Acción</th>}
-            </tr></thead>
-            <tbody>
-              {lista.map(g => {
-                const da = g.estado === 'afuera' ? diasEntre(g.salida) : null;
-                const restante = restantePorGarrafa[g.id];
-                return (
-                  <tr key={g.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={td}><b style={{ color: '#01579b', fontSize: 14 }}>{g.codigo}</b></td>
-                    <td style={td}><span style={{ background: gasColor(g.gas) + '20', color: gasColor(g.gas), fontWeight: 700, fontSize: 12, padding: '2px 9px', borderRadius: 14 }}>{g.gas.toUpperCase()}</span><div style={{ fontSize: 11.5, color: '#999', marginTop: 2 }}>{g.tipo_garrafa}</div></td>
-                    <td style={td}><GarrafaEstado estado={g.estado} /></td>
-                    <td style={td}>{restante != null ? <span style={{ fontSize: 12, color: '#555' }}>≈ {restante.toFixed(1)} kg restantes</span> : '—'}</td>
-                    <td style={td}>{g.supervisor || '—'}</td><td style={td}>{g.destino || '—'}</td><td style={td}>{fmt(g.salida)}</td>
-                    <td style={td}>{g.estado === 'afuera' ? <b style={{ color: da > 30 ? '#c62828' : '#e65100' }}>{da} d</b> : g.dias != null ? <b style={{ color: '#555' }}>{g.dias} d</b> : '—'}</td>
-                    <td style={td}>{g.regreso ? <span>{fmt(g.regreso)}{g.quien_devuelve && <div style={{ fontSize: 11, color: '#999' }}>por {g.quien_devuelve}</div>}</span> : '—'}</td>
-                    {puedeRegistrarUso && <td style={{ ...td, textAlign: 'center' }}>
-                      <div style={{ display: 'flex', gap: 5, justifyContent: 'center', flexWrap: 'wrap' }}>
-                        {esDeposito && g.estado === 'disponible' && <button onClick={() => setModal({ tipo: 'salida', garrafa: g })} style={{ ...btnMini, background: '#e65100' }}><ArrowUpFromLine size={13} /> Sale</button>}
-                        {esDeposito && g.estado === 'afuera' && <button onClick={() => setModal({ tipo: 'regreso', garrafa: g })} style={{ ...btnMini, background: '#00897b' }}><ArrowDownToLine size={13} /> Volvió vacía</button>}
-                        {esDeposito && g.estado === 'vacia' && <button onClick={() => recargar(g.id)} style={{ ...btnMini, background: '#0288d1' }}><CheckCircle2 size={13} /> Recargada</button>}
-                        {g.estado === 'afuera' && <button onClick={() => setModal({ tipo: 'uso', garrafa: g })} style={{ ...btnMini, background: '#6D28D9' }}><Droplets size={13} /> Registrar uso</button>}
-                        <button onClick={() => setModal({ tipo: 'verUsos', garrafa: g })} title="Ver usos" style={{ ...btnMini, background: '#64748b' }}><FileText size={13} /></button>
-                        {esDeposito && <button onClick={() => eliminar(g.id)} style={{ ...btnMini, background: '#fff', color: '#c62828', border: '1.5px solid #ffcdd2' }}><Trash2 size={13} /></button>}
-                      </div>
-                    </td>}
-                  </tr>);
-              })}
-            </tbody>
-          </table>
-          {lista.length === 0 && <Empty texto="No hay garrafas en este estado" />}
-        </div>
+        <TablaGarrafas
+          lista={lista}
+          restantePorGarrafa={restantePorGarrafa}
+          puedeGestionar={puedeGestionar}
+          puedeOperar={esDeposito}
+          puedeRegistrarUso={puedeRegistrarUso}
+          mostrarEliminar
+          bloquearConBase
+          onAbrirModal={abrirModal}
+          onRecargar={recargar}
+          onEliminar={eliminar}
+          diasEntre={diasEntre}
+          fmt={fmt}
+          textoVacio="No hay garrafas en este estado"
+        />
       )}
       {modal?.tipo === 'salida' && <ModalSalidaGarrafa garrafa={modal.garrafa} onClose={() => setModal(null)} onConfirm={salida} />}
       {modal?.tipo === 'regreso' && <ModalRegresoGarrafa garrafa={modal.garrafa} dias={diasEntre(modal.garrafa.salida)} onClose={() => setModal(null)} onConfirm={regreso} />}
@@ -1067,22 +1098,102 @@ function Refrigerantes({ rol, usuario }) {
     </div>
   );
 }
+
+// "Seguimiento de refrigerante" dentro de cada Base (Esmeralda, Perón 500,
+// Torre Galicia): mismo comportamiento que la pantalla central de
+// Refrigerantes (Sale / Registrar uso / Ver usos / Volvió vacía / Recargada),
+// pero acotado a las garrafas de esta base — reutiliza las mismas funciones de
+// acción y los mismos modales de arriba, no los reescribe.
+function SeguimientoRefrigeranteBase({ baseLabel, usuario }) {
+  const [garrafas, setGarrafas] = useState([]);
+  const [usos, setUsos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [modal, setModal] = useState(null);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data: gs } = await supabase.from('garrafas').select('*').eq('base', baseLabel).order('codigo');
+    const ids = (gs || []).map(g => g.id);
+    const { data: us } = ids.length
+      ? await supabase.from('usos_garrafa').select('*').in('garrafa_id', ids).order('fecha', { ascending: false })
+      : { data: [] };
+    setGarrafas(gs || []);
+    setUsos(us || []);
+    setLoading(false);
+  }, [baseLabel]);
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const restantePorGarrafa = useMemo(() => calcularRestantePorGarrafa(garrafas, usos), [garrafas, usos]);
+  const diasEntre = (iso) => iso ? Math.max(0, Math.round((Date.now() - new Date(iso)) / 86400000)) : 0;
+  const fmt = (iso) => iso ? new Date(iso).toLocaleDateString('es-AR') : '—';
+
+  const salida = async (d) => { await accionSalidaGarrafa(usuario, garrafas, d); setModal(null); cargar(); };
+  const regreso = async (d) => { await accionRegresoGarrafa(usuario, garrafas, d); setModal(null); cargar(); };
+  const registrarUso = async (d) => { await accionRegistrarUsoGarrafa(usuario, garrafas, d); setModal(null); cargar(); };
+  const recargar = async (id) => { await accionRecargarGarrafa(id); cargar(); };
+  const abrirModal = (tipo, g) => setModal({ tipo, garrafa: g });
+
+  return (
+    <div>
+      <div style={{ background: '#E1F5FE', border: '1px solid #b3e5fc', borderRadius: 11, padding: '13px 16px', marginBottom: 16, fontSize: 13.5, color: '#01579b' }}>
+        Garrafas de refrigerante asignadas a <b>{baseLabel}</b>: registrá acá cuándo salen, cuánto refrigerante usaron y cuándo vuelven vacías.
+      </div>
+      {loading ? <Cargando /> : (
+        <TablaGarrafas
+          lista={garrafas}
+          restantePorGarrafa={restantePorGarrafa}
+          puedeGestionar
+          puedeOperar
+          puedeRegistrarUso
+          mostrarEliminar={false}
+          onAbrirModal={abrirModal}
+          onRecargar={recargar}
+          diasEntre={diasEntre}
+          fmt={fmt}
+          textoVacio="Todavía no hay garrafas asignadas a esta base."
+        />
+      )}
+      {modal?.tipo === 'salida' && <ModalSalidaGarrafa garrafa={modal.garrafa} destinoFijo={baseLabel} onClose={() => setModal(null)} onConfirm={salida} />}
+      {modal?.tipo === 'regreso' && <ModalRegresoGarrafa garrafa={modal.garrafa} dias={diasEntre(modal.garrafa.salida)} onClose={() => setModal(null)} onConfirm={regreso} />}
+      {modal?.tipo === 'uso' && <ModalUsoGarrafa garrafa={modal.garrafa} onClose={() => setModal(null)} onConfirm={registrarUso} />}
+      {modal?.tipo === 'verUsos' && <ModalUsosGarrafa garrafa={modal.garrafa} usos={usos.filter(u => u.garrafa_id === modal.garrafa.id)} onClose={() => setModal(null)} />}
+    </div>
+  );
+}
+
 function GarrafaEstado({ estado }) {
   const map = { disponible: ['#e8f5e9', '#2e7d32', 'Disponible'], afuera: ['#fff3e0', '#e65100', 'Afuera'], vacia: ['#ffebee', '#c62828', 'Vacía'] };
   const [bg, col, txt] = map[estado] || map.disponible;
   return <span style={{ background: bg, color: col, fontSize: 12, fontWeight: 700, padding: '3px 11px', borderRadius: 20 }}>{txt}</span>;
 }
-function ModalSalidaGarrafa({ garrafa, onClose, onConfirm }) {
+// Destino de salida: 3 bases fijas + "Otro" para trabajos externos sueltos.
+// Elegir una base guarda destino Y base = ese mismo nombre; "Otro" deja base en
+// null y pide el destino a mano (como antes). destinoFijo (usado desde el
+// seguimiento de una Base puntual) fija ambos y saca el selector.
+const OPCIONES_DESTINO_GARRAFA = ['Esmeralda', 'Perón 500', 'Torre Galicia', 'Otro (trabajo externo)'];
+function ModalSalidaGarrafa({ garrafa, destinoFijo, onClose, onConfirm }) {
   const [supervisor, setSupervisor] = useState('');
-  const [destino, setDestino] = useState('');
+  const [destinoSel, setDestinoSel] = useState(OPCIONES_DESTINO_GARRAFA[0]);
+  const [destinoOtro, setDestinoOtro] = useState('');
+  const esOtro = destinoSel === 'Otro (trabajo externo)';
+  const destino = destinoFijo || (esOtro ? destinoOtro.trim() : destinoSel);
+  const base = destinoFijo || (esOtro ? null : destinoSel);
+  const valido = supervisor.trim() && (destinoFijo || !esOtro || destinoOtro.trim());
   return (
     <ModalShell onClose={onClose}>
       <h3 style={{ margin: '0 0 4px', color: '#e65100' }}>Salida de garrafa (llena)</h3>
       <p style={{ margin: '0 0 16px', fontSize: 14, color: '#555' }}>Garrafa <b>{garrafa.codigo}</b> · {garrafa.gas.toUpperCase()} · {garrafa.tipo_garrafa}</p>
       <Field label="¿A qué supervisor/técnico se entrega?"><input value={supervisor} onChange={e => setSupervisor(e.target.value)} placeholder="ej: Juan Pérez" style={inp} /></Field>
-      <Field label="Destino (obra / cliente)"><input value={destino} onChange={e => setDestino(e.target.value)} placeholder="ej: Obra Torre Maipú" style={inp} /></Field>
+      {destinoFijo ? (
+        <Field label="Destino"><div style={{ ...inp, background: '#f8fafc', color: '#555', display: 'flex', alignItems: 'center', boxSizing: 'border-box' }}>{destinoFijo}</div></Field>
+      ) : (
+        <>
+          <Field label="Destino"><select value={destinoSel} onChange={e => setDestinoSel(e.target.value)} style={inp}>{OPCIONES_DESTINO_GARRAFA.map(o => <option key={o} value={o}>{o}</option>)}</select></Field>
+          {esOtro && <Field label="¿A qué destino? (obra / cliente)"><input value={destinoOtro} onChange={e => setDestinoOtro(e.target.value)} placeholder="ej: Obra Torre Maipú" style={inp} /></Field>}
+        </>
+      )}
       <div style={{ background: '#fff3e0', borderRadius: 8, padding: '9px 12px', fontSize: 12.5, color: '#e65100', margin: '4px 0 16px' }}>Se registra la salida de hoy. Los días afuera se cuentan solos hasta que vuelva.</div>
-      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => supervisor && onConfirm({ garrafaId: garrafa.id, supervisor, destino })} style={{ ...btnPri, flex: 1, background: '#e65100' }}>Registrar salida</button></div>
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => valido && onConfirm({ garrafaId: garrafa.id, supervisor: supervisor.trim(), destino, base })} disabled={!valido} style={{ ...btnPri, flex: 1, background: '#e65100', opacity: valido ? 1 : .5, cursor: valido ? 'pointer' : 'not-allowed' }}>Registrar salida</button></div>
     </ModalShell>
   );
 }
@@ -2206,6 +2317,7 @@ function FormReparacion({ vehiculo, usuario, onCancel, onGuardadoOk }) {
 function BaseInventario({ baseId, usuario }) {
   const base = BASES.find(b => b.id === baseId);
   const permitido = basesPermitidas(usuario).some(b => b.id === baseId);
+  const [seccion, setSeccion] = useState('inventario'); // 'inventario' | 'refrigerante'
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
@@ -2298,14 +2410,22 @@ function BaseInventario({ baseId, usuario }) {
 
   return (
     <div>
-      <SectionTitle icon={MapPin} title={base.label} sub={`Inventario de la base · ${items.length} ítems`} accion={
+      <SectionTitle icon={MapPin} title={base.label} sub={seccion === 'inventario' ? `Inventario de la base · ${items.length} ítems` : 'Seguimiento de refrigerante'} accion={seccion === 'inventario' ? (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {items.length > 0 && <button onClick={() => setConfirmVaciar(true)} style={{ ...btnSec, padding: '8px 14px', color: '#DC2626', borderColor: '#F7C1C1' }}><Trash2 size={15} /> Vaciar base</button>}
           <button onClick={() => fileRef.current?.click()} disabled={importando} style={{ ...btnSec, padding: '8px 14px', opacity: importando ? .6 : 1 }}><Upload size={15} /> {importando ? 'Importando...' : 'Importar Excel'}</button>
           <button onClick={() => setModalNuevo(true)} style={{ ...btnPri, padding: '8px 14px' }}><Plus size={16} /> Agregar ítem</button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={importarExcel} style={{ display: 'none' }} />
         </div>
-      } />
+      ) : null} />
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 18, borderBottom: '1.5px solid #f1f5f9' }}>
+        {[['inventario', 'Inventario'], ['refrigerante', 'Seguimiento de refrigerante']].map(([id, label]) => (
+          <button key={id} onClick={() => setSeccion(id)} style={{ padding: '9px 16px', border: 'none', borderBottom: '2.5px solid ' + (seccion === id ? AZUL : 'transparent'), background: 'none', color: seccion === id ? AZUL : '#94a3b8', fontWeight: 700, fontSize: 13.5, cursor: 'pointer', fontFamily: "'Sora', sans-serif" }}>{label}</button>
+        ))}
+      </div>
+
+      {seccion === 'refrigerante' ? <SeguimientoRefrigeranteBase baseLabel={base.label} usuario={usuario} /> : <>
 
       {msg && <div style={{ background: msg.startsWith('✓') ? '#E7F8EF' : '#FEECEC', color: msg.startsWith('✓') ? '#059669' : '#DC2626', borderRadius: 10, padding: '11px 15px', marginBottom: 14, fontSize: 13.5, fontWeight: 600 }}>{msg}</div>}
 
@@ -2361,6 +2481,7 @@ function BaseInventario({ baseId, usuario }) {
         <div style={{ background: '#FEECEC', borderRadius: 9, padding: '11px 14px', fontSize: 13, color: '#DC2626', marginBottom: 18, fontWeight: 600 }}>Esta acción NO se puede deshacer. Solo afecta a {base.label}, no toca las otras bases.</div>
         <div style={{ display: 'flex', gap: 10 }}><button onClick={() => setConfirmVaciar(false)} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={vaciarBase} style={{ ...btnPri, flex: 1, background: '#DC2626' }}><Trash2 size={16} /> Sí, vaciar todo</button></div>
       </ModalShell>}
+      </>}
     </div>
   );
 }
