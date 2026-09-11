@@ -921,18 +921,44 @@ function ModalEntrada({ item, onClose, onConfirm }) {
 // ========================= REFRIGERANTES =========================
 function Refrigerantes({ rol, usuario }) {
   const [garrafas, setGarrafas] = useState([]);
+  const [usos, setUsos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [filtro, setFiltro] = useState('Todas');
   const esDeposito = rol === 'deposito' || accesoTotal(usuario);
+  // Registrar uso: además de depósito, lo puede hacer supervisor ("mesa de ayuda").
+  const puedeRegistrarUso = esDeposito || rol === 'supervisor';
 
   const cargar = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase.from('garrafas').select('*').order('codigo');
-    setGarrafas(data || []);
+    const [g, u] = await Promise.all([
+      supabase.from('garrafas').select('*').order('codigo'),
+      supabase.from('usos_garrafa').select('*').order('fecha', { ascending: false }),
+    ]);
+    setGarrafas(g.data || []);
+    setUsos(u.data || []);
     setLoading(false);
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
+
+  // Kg restantes estimados: peso_inicial menos lo usado desde la última vez que
+  // salió llena (g.salida). No hace falta reconstruir el historial de regresos:
+  // solo se puede "Sale" desde 'disponible', así que cada g.salida ya marca el
+  // arranque de un tanque lleno; si nunca volvió vacía, es su primera salida y
+  // no hay usos anteriores a esa fecha de todos modos.
+  const restantePorGarrafa = useMemo(() => {
+    const mapa = {};
+    for (const g of garrafas) {
+      if (g.estado !== 'afuera' || !g.salida) continue;
+      const usado = usos
+        .filter(u => u.garrafa_id === g.id && u.fecha && new Date(u.fecha) >= new Date(g.salida))
+        .reduce((a, b) => a + Number(b.kg_usados || 0), 0);
+      const inicial = Number(g.peso_inicial ?? 13.6);
+      const restante = inicial - usado;
+      if (restante > 0) mapa[g.id] = restante;
+    }
+    return mapa;
+  }, [garrafas, usos]);
 
   const diasEntre = (iso) => iso ? Math.max(0, Math.round((Date.now() - new Date(iso)) / 86400000)) : 0;
 
@@ -947,6 +973,21 @@ function Refrigerantes({ rol, usuario }) {
     const dias = diasEntre(g.salida);
     const { error } = await supabase.from('garrafas').update({ estado: 'vacia', regreso: new Date().toISOString(), dias, quien_devuelve: d.quienDevuelve }).eq('id', d.garrafaId);
     if (!error) registrarMovimiento(usuario, 'garrafa_regreso', `Garrafa ${g?.codigo ?? d.garrafaId} — regreso, devolvió ${d.quienDevuelve} (${dias} día${dias !== 1 ? 's' : ''} afuera)`, 'garrafa', d.garrafaId);
+    setModal(null); cargar();
+  };
+  const registrarUso = async (d) => {
+    const g = garrafas.find(x => x.id === d.garrafaId);
+    const { error } = await supabase.from('usos_garrafa').insert({
+      garrafa_id: d.garrafaId,
+      fecha: new Date().toISOString(),
+      tecnico: d.tecnico,
+      trabajo: d.trabajo || null,
+      kg_usados: d.kgUsados,
+      registrado_por: usuario.nombre,
+    });
+    if (!error) {
+      registrarMovimiento(usuario, 'uso_refrigerante', `Garrafa ${g?.codigo ?? d.garrafaId}: ${d.kgUsados} kg usados por ${d.tecnico}${d.trabajo ? ` — ${d.trabajo}` : ''}`, 'garrafa', d.garrafaId);
+    }
     setModal(null); cargar();
   };
   const recargar = async (id) => {
@@ -969,7 +1010,7 @@ function Refrigerantes({ rol, usuario }) {
     <div>
       <SectionTitle icon={Droplets} title="Refrigerantes — Control de Garrafas" sub="Trazabilidad individual · sale llena / vuelve vacía" accion={<BotonRefrescar onClick={cargar} />} />
       <div style={{ background: '#E1F5FE', border: '1px solid #b3e5fc', borderRadius: 11, padding: '13px 16px', marginBottom: 18, fontSize: 13.5, color: '#01579b' }}>
-        <b>Ciclo de cada garrafa:</b> logística registra cuando <b>sale</b> (a qué supervisor y destino) y cuando <b>vuelve vacía</b> (quién la devuelve y los días afuera, calculados solos). {!esDeposito && <span>Solo <b>Depósito/Logística</b> registra movimientos.</span>}
+        <b>Ciclo de cada garrafa:</b> logística registra cuando <b>sale</b> (a qué supervisor y destino) y cuando <b>vuelve vacía</b> (quién la devuelve y los días afuera, calculados solos). Mientras está afuera, depósito o supervisor pueden ir cargando cuánto <b>refrigerante se usó</b>. {!esDeposito && !puedeRegistrarUso && <span>Solo <b>Depósito/Logística</b> registra movimientos.</span>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px,1fr))', gap: 14, marginBottom: 20 }}>
         {[['Disponibles (llenas)', disponibles, '#2e7d32', CheckCircle2], ['Afuera (en la calle)', afuera, '#e65100', ArrowUpFromLine], ['Vacías (a recargar)', vacias, '#c62828', ArrowDownToLine]].map(([t, v, col, Ic]) => (
@@ -986,24 +1027,30 @@ function Refrigerantes({ rol, usuario }) {
         <div style={{ background: '#fff', borderRadius: 13, overflow: 'auto', boxShadow: '0 2px 12px rgba(0,0,0,.05)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 800 }}>
             <thead><tr style={{ background: 'linear-gradient(135deg, #0284C7, #0EA5E9)', color: '#fff', textAlign: 'left' }}>
-              <th style={th}>Garrafa</th><th style={th}>Gas / Tipo</th><th style={th}>Estado</th><th style={th}>Supervisor</th><th style={th}>Destino</th><th style={th}>Salida</th><th style={th}>Días</th><th style={th}>Regreso</th>{esDeposito && <th style={{ ...th, textAlign: 'center', width: 180 }}>Acción</th>}
+              <th style={th}>Garrafa</th><th style={th}>Gas / Tipo</th><th style={th}>Estado</th><th style={th}>Restante</th><th style={th}>Supervisor</th><th style={th}>Destino</th><th style={th}>Salida</th><th style={th}>Días</th><th style={th}>Regreso</th>{puedeRegistrarUso && <th style={{ ...th, textAlign: 'center', width: 220 }}>Acción</th>}
             </tr></thead>
             <tbody>
               {lista.map(g => {
                 const da = g.estado === 'afuera' ? diasEntre(g.salida) : null;
+                const restante = restantePorGarrafa[g.id];
                 return (
                   <tr key={g.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                     <td style={td}><b style={{ color: '#01579b', fontSize: 14 }}>{g.codigo}</b></td>
                     <td style={td}><span style={{ background: gasColor(g.gas) + '20', color: gasColor(g.gas), fontWeight: 700, fontSize: 12, padding: '2px 9px', borderRadius: 14 }}>{g.gas.toUpperCase()}</span><div style={{ fontSize: 11.5, color: '#999', marginTop: 2 }}>{g.tipo_garrafa}</div></td>
                     <td style={td}><GarrafaEstado estado={g.estado} /></td>
+                    <td style={td}>{restante != null ? <span style={{ fontSize: 12, color: '#555' }}>≈ {restante.toFixed(1)} kg restantes</span> : '—'}</td>
                     <td style={td}>{g.supervisor || '—'}</td><td style={td}>{g.destino || '—'}</td><td style={td}>{fmt(g.salida)}</td>
                     <td style={td}>{g.estado === 'afuera' ? <b style={{ color: da > 30 ? '#c62828' : '#e65100' }}>{da} d</b> : g.dias != null ? <b style={{ color: '#555' }}>{g.dias} d</b> : '—'}</td>
                     <td style={td}>{g.regreso ? <span>{fmt(g.regreso)}{g.quien_devuelve && <div style={{ fontSize: 11, color: '#999' }}>por {g.quien_devuelve}</div>}</span> : '—'}</td>
-                    {esDeposito && <td style={{ ...td, textAlign: 'center' }}>
-                      {g.estado === 'disponible' && <button onClick={() => setModal({ tipo: 'salida', garrafa: g })} style={{ ...btnMini, background: '#e65100' }}><ArrowUpFromLine size={13} /> Sale</button>}
-                      {g.estado === 'afuera' && <button onClick={() => setModal({ tipo: 'regreso', garrafa: g })} style={{ ...btnMini, background: '#00897b' }}><ArrowDownToLine size={13} /> Volvió vacía</button>}
-                      {g.estado === 'vacia' && <button onClick={() => recargar(g.id)} style={{ ...btnMini, background: '#0288d1' }}><CheckCircle2 size={13} /> Recargada</button>}
-                      <button onClick={() => eliminar(g.id)} style={{ ...btnMini, background: '#fff', color: '#c62828', border: '1.5px solid #ffcdd2', marginLeft: 5 }}><Trash2 size={13} /></button>
+                    {puedeRegistrarUso && <td style={{ ...td, textAlign: 'center' }}>
+                      <div style={{ display: 'flex', gap: 5, justifyContent: 'center', flexWrap: 'wrap' }}>
+                        {esDeposito && g.estado === 'disponible' && <button onClick={() => setModal({ tipo: 'salida', garrafa: g })} style={{ ...btnMini, background: '#e65100' }}><ArrowUpFromLine size={13} /> Sale</button>}
+                        {esDeposito && g.estado === 'afuera' && <button onClick={() => setModal({ tipo: 'regreso', garrafa: g })} style={{ ...btnMini, background: '#00897b' }}><ArrowDownToLine size={13} /> Volvió vacía</button>}
+                        {esDeposito && g.estado === 'vacia' && <button onClick={() => recargar(g.id)} style={{ ...btnMini, background: '#0288d1' }}><CheckCircle2 size={13} /> Recargada</button>}
+                        {g.estado === 'afuera' && <button onClick={() => setModal({ tipo: 'uso', garrafa: g })} style={{ ...btnMini, background: '#6D28D9' }}><Droplets size={13} /> Registrar uso</button>}
+                        <button onClick={() => setModal({ tipo: 'verUsos', garrafa: g })} title="Ver usos" style={{ ...btnMini, background: '#64748b' }}><FileText size={13} /></button>
+                        {esDeposito && <button onClick={() => eliminar(g.id)} style={{ ...btnMini, background: '#fff', color: '#c62828', border: '1.5px solid #ffcdd2' }}><Trash2 size={13} /></button>}
+                      </div>
                     </td>}
                   </tr>);
               })}
@@ -1015,6 +1062,8 @@ function Refrigerantes({ rol, usuario }) {
       {modal?.tipo === 'salida' && <ModalSalidaGarrafa garrafa={modal.garrafa} onClose={() => setModal(null)} onConfirm={salida} />}
       {modal?.tipo === 'regreso' && <ModalRegresoGarrafa garrafa={modal.garrafa} dias={diasEntre(modal.garrafa.salida)} onClose={() => setModal(null)} onConfirm={regreso} />}
       {modal?.tipo === 'nueva' && <ModalNuevaGarrafa onClose={() => setModal(null)} onConfirm={nueva} />}
+      {modal?.tipo === 'uso' && <ModalUsoGarrafa garrafa={modal.garrafa} onClose={() => setModal(null)} onConfirm={registrarUso} />}
+      {modal?.tipo === 'verUsos' && <ModalUsosGarrafa garrafa={modal.garrafa} usos={usos.filter(u => u.garrafa_id === modal.garrafa.id)} onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -1047,6 +1096,61 @@ function ModalRegresoGarrafa({ garrafa, dias, onClose, onConfirm }) {
       <Field label="¿Quién devuelve la garrafa vacía?"><input value={quienDevuelve} onChange={e => setQuienDevuelve(e.target.value)} placeholder="ej: Juan Pérez" style={inp} /></Field>
       <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => quienDevuelve && onConfirm({ garrafaId: garrafa.id, quienDevuelve })} style={{ ...btnPri, flex: 1, background: '#00897b' }}>Confirmar regreso</button></div>
     </ModalShell>
+  );
+}
+function ModalUsoGarrafa({ garrafa, onClose, onConfirm }) {
+  const [tecnico, setTecnico] = useState(garrafa.supervisor || '');
+  const [trabajo, setTrabajo] = useState('');
+  const [kg, setKg] = useState('');
+  const kgNum = parseFloat(kg);
+  const valido = tecnico.trim() && !isNaN(kgNum) && kgNum > 0;
+  const confirmar = () => {
+    if (!valido) return;
+    onConfirm({ garrafaId: garrafa.id, tecnico: tecnico.trim(), trabajo: trabajo.trim(), kgUsados: Math.round(kgNum * 10) / 10 });
+  };
+  return (
+    <ModalShell onClose={onClose}>
+      <h3 style={{ margin: '0 0 4px', color: '#6D28D9' }}>Registrar uso de refrigerante</h3>
+      <p style={{ margin: '0 0 16px', fontSize: 14, color: '#555' }}>Garrafa <b>{garrafa.codigo}</b> · {garrafa.gas.toUpperCase()} · {garrafa.tipo_garrafa}</p>
+      <Field label="Técnico que usó la garrafa"><input value={tecnico} onChange={e => setTecnico(e.target.value)} placeholder="ej: Juan Pérez" style={inp} /></Field>
+      <Field label="Trabajo / obra / cliente (opcional)"><input value={trabajo} onChange={e => setTrabajo(e.target.value)} placeholder="ej: Obra Torre Maipú" style={inp} /></Field>
+      <Field label="Kg usados *"><input type="number" step="0.1" min="0" value={kg} onChange={e => setKg(e.target.value)} placeholder="ej: 2.5" style={inp} /></Field>
+      <div style={{ display: 'flex', gap: 10, marginTop: 8 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={confirmar} disabled={!valido} style={{ ...btnPri, flex: 1, background: '#6D28D9', opacity: valido ? 1 : .5, cursor: valido ? 'pointer' : 'not-allowed' }}>Registrar uso</button></div>
+    </ModalShell>
+  );
+}
+function ModalUsosGarrafa({ garrafa, usos, onClose }) {
+  const fmtH = (d) => d ? new Date(d).toLocaleString('es-AR') : '—';
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(7,11,52,0.55)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} className="fadein" style={{ background: '#fff', borderRadius: 18, padding: 26, width: 620, maxWidth: '100%', maxHeight: '88vh', overflow: 'auto', boxShadow: '0 30px 80px rgba(7,11,52,0.4)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+          <h3 style={{ margin: 0, color: '#01579b', fontSize: 19, fontWeight: 800 }}>Usos registrados — {garrafa.codigo}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><XCircle size={22} /></button>
+        </div>
+        <p style={{ margin: '0 0 16px', fontSize: 13, color: '#94a3b8' }}>{garrafa.gas.toUpperCase()} · {garrafa.tipo_garrafa}</p>
+        {usos.length === 0 ? <Empty texto="Todavía no hay usos registrados para esta garrafa" /> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead><tr style={{ textAlign: 'left', color: '#888', borderBottom: '2px solid #eee' }}>
+                <th style={th}>Fecha</th><th style={th}>Técnico</th><th style={th}>Trabajo</th><th style={{ ...th, textAlign: 'center' }}>Kg</th><th style={th}>Registró</th>
+              </tr></thead>
+              <tbody>
+                {usos.map(u => (
+                  <tr key={u.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                    <td style={td}>{fmtH(u.fecha)}</td>
+                    <td style={td}>{u.tecnico}</td>
+                    <td style={td}>{u.trabajo || '—'}</td>
+                    <td style={{ ...td, textAlign: 'center', fontWeight: 700, color: '#6D28D9' }}>{Number(u.kg_usados).toFixed(1)}</td>
+                    <td style={td}>{u.registrado_por || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 function ModalNuevaGarrafa({ onClose, onConfirm }) {
