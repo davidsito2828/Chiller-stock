@@ -980,6 +980,16 @@ function calcularRestantePorGarrafa(garrafas, usos) {
   return mapa;
 }
 
+// Extrae el peso en kg desde el texto libre de tipo_garrafa (ej: "Garrafa 6,8
+// KG" → 6.8, "Garrafa 13,60 KG" → 13.6). Acepta coma o punto decimal. Si no
+// encuentra el patrón "número + KG", devuelve 13.6 (el peso más común y el
+// default histórico de la columna) para no dejar el campo vacío.
+function pesoDesdeTipoGarrafa(tipoGarrafa) {
+  const m = String(tipoGarrafa || '').match(/([0-9]+(?:[.,][0-9]+)?)\s*kg/i);
+  if (!m) return 13.6;
+  return parseFloat(m[1].replace(',', '.')) || 13.6;
+}
+
 // Tabla de garrafas + acciones, reutilizada por la pantalla central de
 // Refrigerantes (todas las garrafas) y por "Seguimiento de refrigerante" de
 // cada Base (solo las suyas). Quien la usa maneja el estado del modal y decide
@@ -1063,7 +1073,7 @@ function Refrigerantes({ rol, usuario }) {
   const registrarUso = async (d) => { await accionRegistrarUsoGarrafa(usuario, garrafas, d); setModal(null); cargar(); };
   const recargar = async (id) => { await accionRecargarGarrafa(id); cargar(); };
   const nueva = async (d) => {
-    await supabase.from('garrafas').insert({ codigo: d.codigo, gas: d.gas, tipo_garrafa: d.tg, marca: d.ma, estado: 'disponible' });
+    await supabase.from('garrafas').insert({ codigo: d.codigo, gas: d.gas, tipo_garrafa: d.tg, marca: d.ma, estado: 'disponible', peso_inicial: d.pesoInicial });
     setModal(null); cargar();
   };
   const eliminar = async (id) => { await supabase.from('garrafas').delete().eq('id', id); cargar(); };
@@ -1305,15 +1315,19 @@ function ModalEntregaVacioGarrafa({ garrafa, onClose, onConfirm }) {
 function ModalNuevaGarrafa({ onClose, onConfirm }) {
   const [f, setF] = useState({ gas: 'R410a', num: '', tg: 'Garrafa 13,60 KG', ma: '' });
   const codigo = f.gas.toUpperCase() + (f.num ? '-' + f.num : '');
+  // El peso inicial se detecta solo a partir del número que haya en "Tipo / peso"
+  // (ej: "Garrafa 6,8 KG" → 6.8 kg), así el cálculo de kg restantes no queda
+  // fijo en 13,6 para garrafas más chicas o más grandes.
+  const pesoInicial = pesoDesdeTipoGarrafa(f.tg);
   return (
     <ModalShell onClose={onClose}>
       <h3 style={{ margin: '0 0 16px', color: '#0288d1' }}>Registrar nueva garrafa</h3>
       <Field label="Tipo de gas"><select value={f.gas} onChange={e => setF({ ...f, gas: e.target.value })} style={inp}><option>R410a</option><option>R134a</option><option>R22</option><option>R32</option><option>R407c</option></select></Field>
       <Field label="N° de garrafa (lo asigna logística)"><input value={f.num} onChange={e => setF({ ...f, num: e.target.value })} placeholder="ej: 10" style={inp} /></Field>
-      <Field label="Tipo / peso"><input value={f.tg} onChange={e => setF({ ...f, tg: e.target.value })} style={inp} /></Field>
+      <Field label="Tipo / peso"><input value={f.tg} onChange={e => setF({ ...f, tg: e.target.value })} placeholder="ej: Garrafa 6,8 KG" style={inp} /></Field>
       <Field label="Marca"><input value={f.ma} onChange={e => setF({ ...f, ma: e.target.value })} style={inp} /></Field>
-      <div style={{ background: '#E1F5FE', borderRadius: 8, padding: '9px 12px', fontSize: 13, color: '#01579b', margin: '4px 0 16px' }}>Código: <b>{codigo || '(falta n°)'}</b></div>
-      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.num && onConfirm({ ...f, codigo })} style={{ ...btnPri, flex: 1, background: '#0288d1' }}>Registrar</button></div>
+      <div style={{ background: '#E1F5FE', borderRadius: 8, padding: '9px 12px', fontSize: 13, color: '#01579b', margin: '4px 0 16px' }}>Código: <b>{codigo || '(falta n°)'}</b> · Peso inicial detectado: <b>{pesoInicial} kg</b></div>
+      <div style={{ display: 'flex', gap: 10 }}><button onClick={onClose} style={{ ...btnSec, flex: 1 }}>Cancelar</button><button onClick={() => f.num && onConfirm({ ...f, codigo, pesoInicial })} style={{ ...btnPri, flex: 1, background: '#0288d1' }}>Registrar</button></div>
     </ModalShell>
   );
 }
