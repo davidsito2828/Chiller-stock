@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock, Menu, Users, KeyRound, History } from 'lucide-react';
+import { Package, Search, Plus, Minus, ShoppingCart, ClipboardList, CheckCircle2, XCircle, Clock, LogIn, Boxes, Droplets, LayoutDashboard, Bell, ArrowDownToLine, ArrowUpFromLine, Building2, User, FileText, Trash2, Edit3, ArrowRight, ArrowLeft, Wrench, RefreshCw, Truck, Gauge, AlertTriangle, Calendar, Building, Upload, MapPin, Lock, Menu, Users, KeyRound, History, MessageCircle, Send } from 'lucide-react';
 
 const AZUL = '#0000DE';
 const AZUL_OSC = '#0000A8';
@@ -90,6 +90,7 @@ export default function Home() {
           {vista === 'carrito' && <Carrito usuario={usuario} onIrPedidos={() => irA('pedidos')} />}
           {vista === 'pedidos' && <Pedidos rol={rol} usuario={usuario} />}
           {vista === 'movimientos' && ((rol === 'supervisor' || rol === 'dueno' || accesoTotal(usuario)) ? <Movimientos /> : <AccesoDenegado titulo="Movimientos" mensaje="Este módulo es solo para Gerente y Supervisores." />)}
+          {vista === 'chat' && (rol === 'tecnico' ? <AccesoDenegado titulo="Chat" mensaje="Este módulo es solo para Supervisores, Depósito y Gerencia." /> : <Chat rol={rol} usuario={usuario} />)}
           {vista.startsWith('base:') && <BaseInventario baseId={vista.slice(5)} usuario={usuario} />}
         </main>
       </div>
@@ -114,6 +115,42 @@ function useCarrito() {
   const [items, setItems] = useState(carritoStore.get());
   useEffect(() => carritoStore.subscribe(setItems), []);
   return items;
+}
+
+// ============ Chat: aviso simple para refrescar el badge del Sidebar ============
+// No hay tiempo real (websockets): cuando se manda un mensaje o se marca una
+// conversación como leída, se avisa acá para que el contador del menú se
+// actualice al toque, sin esperar al polling de 30s.
+const chatEventos = { listeners: new Set(), avisar() { this.listeners.forEach(l => l()); }, subscribe(l) { this.listeners.add(l); return () => this.listeners.delete(l); } };
+
+// Cantidad de mensajes sin leer para el usuario actual: para un supervisor,
+// los de depósito en SU conversación; para depósito/gerencia, los de
+// cualquier supervisor en TODAS las conversaciones.
+function useChatNoLeidos(usuario, rol) {
+  const [n, setN] = useState(0);
+  // El rol 'supervisor' siempre es "su propia conversación", sin excepción
+  // por accesoTotal (así lo pide el módulo); el resto de quienes pueden ver
+  // Chat (deposito, dueno) cae en la bandeja de todas las conversaciones.
+  const puedeVer = rol === 'supervisor' || rol === 'deposito' || rol === 'dueno';
+  const modoDeposito = puedeVer && rol !== 'supervisor';
+
+  const cargar = useCallback(async () => {
+    if (!usuario || !puedeVer) { setN(0); return; }
+    let q = supabase.from('chat_mensajes').select('*', { count: 'exact', head: true }).eq('leido', false);
+    q = modoDeposito ? q.eq('lado', 'supervisor') : q.eq('supervisor_mail', usuario.mail).eq('lado', 'deposito');
+    const { count } = await q;
+    setN(count || 0);
+  }, [usuario, modoDeposito, puedeVer]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    if (!puedeVer) return;
+    const id = setInterval(cargar, 30000);
+    return () => clearInterval(id);
+  }, [cargar, puedeVer]);
+  useEffect(() => chatEventos.subscribe(cargar), [cargar]);
+
+  return n;
 }
 
 // Detecta si la pantalla es de celular (menos de 820px de ancho)
@@ -288,6 +325,7 @@ function Header({ usuario, onLogout, esMovil, onToggleMenu }) {
 // ========================= SIDEBAR =========================
 function Sidebar({ vista, setVista, rol, usuario }) {
   const carrito = useCarrito();
+  const noLeidosChat = useChatNoLeidos(usuario, rol);
   const items = [
     { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
     { id: 'stock', label: 'Stock General', icon: Boxes, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
@@ -298,6 +336,8 @@ function Sidebar({ vista, setVista, rol, usuario }) {
     { id: 'pedidos', label: 'Pedidos', icon: ClipboardList, roles: ['supervisor', 'tecnico', 'dueno', 'deposito'] },
     // Solo supervisor y gerencia (dueño o accesoTotal, sin importar su rol de base).
     { id: 'movimientos', label: 'Movimientos', icon: History, roles: ['supervisor', 'dueno'], total: true },
+    // Técnico queda afuera siempre (ver AccesoDenegado en el switch de Home).
+    { id: 'chat', label: 'Chat', icon: MessageCircle, roles: ['supervisor', 'dueno', 'deposito'], badge: noLeidosChat },
   ];
   const misBases = basesPermitidas(usuario);
   return (
@@ -538,6 +578,167 @@ function Movimientos() {
         </div>
       )}
       {!loading && filtrados.length > 0 && <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 8 }}>{filtrados.length} movimiento{filtrados.length > 1 ? 's' : ''}</div>}
+    </div>
+  );
+}
+
+// ========================= CHAT =========================
+// Conversaciones 1 a 1 entre cada supervisor y "depósito" (que incluye
+// depósito/logística y gerencia/dueño). Un supervisor entra directo a SU
+// conversación; depósito/gerencia ve primero una bandeja con todos los
+// supervisores que tengan al menos un mensaje.
+function Chat({ rol, usuario }) {
+  // 'supervisor' siempre es su propia conversación, sin excepción por
+  // accesoTotal; cualquier otro rol que llegue acá (deposito, dueno) ve la
+  // bandeja de todos los supervisores.
+  const modoDeposito = rol !== 'supervisor';
+  const [conv, setConv] = useState(modoDeposito ? null : { mail: usuario.mail, nombre: usuario.nombre });
+
+  if (modoDeposito && !conv) return <BandejaChat onAbrir={setConv} />;
+  return (
+    <ConversacionChat
+      usuario={usuario}
+      supervisorMail={conv.mail}
+      supervisorNombre={conv.nombre}
+      onVolver={modoDeposito ? () => setConv(null) : null}
+    />
+  );
+}
+
+// Bandeja de depósito/gerencia: un mensaje por conversación (el más reciente)
+// + cuántos sin leer tiene cada una. No hay una consulta de "agrupar por" en
+// el cliente de Supabase, así que se trae todo chat_mensajes (paginado con
+// traerTodas por si crece) y se agrupa acá.
+function BandejaChat({ onAbrir }) {
+  const [mensajes, setMensajes] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const data = await traerTodas((d, h) => supabase.from('chat_mensajes').select('*').order('fecha', { ascending: false }).range(d, h));
+    setMensajes(data);
+    setLoading(false);
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { const id = setInterval(cargar, 30000); return () => clearInterval(id); }, [cargar]);
+
+  // mensajes ya viene ordenado por fecha desc, así que el primero que se ve
+  // de cada supervisor_mail es justo su último mensaje.
+  const conversaciones = useMemo(() => {
+    const mapa = new Map();
+    for (const m of mensajes) {
+      if (!mapa.has(m.supervisor_mail)) {
+        mapa.set(m.supervisor_mail, { mail: m.supervisor_mail, nombre: m.supervisor_nombre, ultimoMensaje: m.mensaje, ultimoLado: m.lado, ultimaFecha: m.fecha, noLeidos: 0 });
+      }
+      if (m.lado === 'supervisor' && !m.leido) mapa.get(m.supervisor_mail).noLeidos++;
+    }
+    return Array.from(mapa.values()).sort((a, b) => new Date(b.ultimaFecha) - new Date(a.ultimaFecha));
+  }, [mensajes]);
+
+  const fmtH = (d) => d ? new Date(d).toLocaleString('es-AR') : '';
+
+  return (
+    <div>
+      <SectionTitle icon={MessageCircle} title="Chat" sub="Conversaciones con supervisores" accion={<BotonRefrescar onClick={cargar} />} />
+      {loading ? <Cargando /> : conversaciones.length === 0 ? <Card><Empty texto="Todavía no hay conversaciones" /></Card> : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {conversaciones.map(c => (
+            <button key={c.mail} onClick={() => onAbrir({ mail: c.mail, nombre: c.nombre })} className="fadein" style={{ textAlign: 'left', background: '#fff', border: 'none', borderRadius: 13, padding: '14px 18px', boxShadow: '0 2px 12px rgba(0,0,0,.05)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14 }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, color: TINTA, fontSize: 14.5 }}>{c.nombre}</div>
+                <div style={{ fontSize: 13, color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.ultimoLado === 'deposito' ? 'Vos: ' : ''}{c.ultimoMensaje}</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: '#aaa' }}>{fmtH(c.ultimaFecha)}</span>
+                {c.noLeidos > 0 && <span style={{ background: '#FF3B5C', color: '#fff', borderRadius: 10, fontSize: 11, fontWeight: 700, padding: '2px 8px' }}>{c.noLeidos}</span>}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Ventana de una conversación puntual (burbujas), reutilizada tanto para la
+// vista directa del supervisor como para cada conversación abierta desde la
+// bandeja de depósito/gerencia.
+function ConversacionChat({ usuario, supervisorMail, supervisorNombre, onVolver }) {
+  const [mensajes, setMensajes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [texto, setTexto] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const finRef = React.useRef(null);
+  // Si quien mira es el propio dueño del hilo, escribe como 'supervisor'; en
+  // cualquier otro caso (depósito, gerencia, u otro supervisor con acceso
+  // total mirando un hilo ajeno) escribe como 'deposito'.
+  const esDuenioDelHilo = usuario.mail === supervisorMail;
+  const miLado = esDuenioDelHilo ? 'supervisor' : 'deposito';
+  const ladoOtro = esDuenioDelHilo ? 'deposito' : 'supervisor';
+
+  const cargar = useCallback(async () => {
+    const { data } = await supabase.from('chat_mensajes').select('*').eq('supervisor_mail', supervisorMail).order('fecha', { ascending: true });
+    setMensajes(data || []);
+  }, [supervisorMail]);
+
+  const marcarLeidos = useCallback(async () => {
+    const { error } = await supabase.from('chat_mensajes').update({ leido: true }).eq('supervisor_mail', supervisorMail).eq('lado', ladoOtro).eq('leido', false);
+    if (!error) chatEventos.avisar();
+  }, [supervisorMail, ladoOtro]);
+
+  useEffect(() => {
+    (async () => { setLoading(true); await cargar(); await marcarLeidos(); setLoading(false); })();
+  }, [cargar, marcarLeidos]);
+
+  useEffect(() => {
+    const id = setInterval(async () => { await cargar(); await marcarLeidos(); }, 30000);
+    return () => clearInterval(id);
+  }, [cargar, marcarLeidos]);
+
+  useEffect(() => { finRef.current?.scrollIntoView({ block: 'end' }); }, [mensajes]);
+
+  const enviar = async () => {
+    const t = texto.trim();
+    if (!t || enviando) return;
+    setEnviando(true);
+    const { error } = await supabase.from('chat_mensajes').insert({
+      supervisor_mail: supervisorMail,
+      supervisor_nombre: supervisorNombre,
+      lado: miLado,
+      emisor: usuario.nombre,
+      mensaje: t,
+      leido: false,
+    });
+    setEnviando(false);
+    if (!error) { setTexto(''); chatEventos.avisar(); cargar(); }
+  };
+
+  const fmtH = (d) => d ? new Date(d).toLocaleString('es-AR') : '';
+
+  return (
+    <div>
+      <SectionTitle icon={MessageCircle} title={esDuenioDelHilo ? 'Chat con Depósito' : supervisorNombre} sub={esDuenioDelHilo ? 'Tu conversación con Depósito / Gerencia' : `Conversación con ${supervisorNombre}`}
+        accion={onVolver ? <button onClick={onVolver} style={{ ...btnSec, padding: '8px 14px' }}><ArrowLeft size={15} /> Volver</button> : <BotonRefrescar onClick={cargar} />} />
+      <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.05)', display: 'flex', flexDirection: 'column', height: '64vh', minHeight: 420, overflow: 'hidden' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {loading ? <Cargando /> : mensajes.length === 0 ? <Empty texto="Todavía no hay mensajes. Escribí el primero." /> : mensajes.map(m => {
+            const esMio = m.lado === miLado;
+            return (
+              <div key={m.id} style={{ display: 'flex', flexDirection: 'column', alignItems: esMio ? 'flex-end' : 'flex-start' }}>
+                <div style={{ maxWidth: '75%', background: esMio ? AZUL : '#f1f5f9', color: esMio ? '#fff' : TINTA, borderRadius: 14, padding: '9px 13px', fontSize: 14, lineHeight: 1.4, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{m.mensaje}</div>
+                <div style={{ fontSize: 10.5, color: '#aaa', marginTop: 3, padding: '0 3px' }}>{m.emisor} · {fmtH(m.fecha)}</div>
+              </div>
+            );
+          })}
+          <div ref={finRef} />
+        </div>
+        <div style={{ display: 'flex', gap: 8, padding: '12px 16px', borderTop: '1px solid #eee' }}>
+          <input value={texto} onChange={e => setTexto(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar(); } }}
+            placeholder="Escribí un mensaje..." disabled={enviando} style={{ ...inp, flex: 1 }} />
+          <button onClick={enviar} disabled={enviando || !texto.trim()} style={{ ...btnPri, opacity: (enviando || !texto.trim()) ? .5 : 1, cursor: (enviando || !texto.trim()) ? 'not-allowed' : 'pointer' }}><Send size={16} /> Enviar</button>
+        </div>
+      </div>
     </div>
   );
 }
